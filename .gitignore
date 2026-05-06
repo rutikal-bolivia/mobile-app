@@ -11,8 +11,6 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
-LaPaz.mbtiles
-*.mbtiles
 # IntelliJ related
 *.iml
 *.ipr
