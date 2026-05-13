@@ -11,7 +11,8 @@ class MapConfig {
 
   static const double initialLatitude = -16.5000;
   static const double initialLongitude = -68.1500;
-  static const double initialZoom = 14.5;
+  static const double initialZoom = 14.0;
+  static const double searchZoom = 17.0;
 
   static const int sourceMinZoom = 0;
   static const int sourceMaxZoom = 14;

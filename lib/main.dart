@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'src/presentation/pages/map_page.dart';
+import 'src/presentation/pages/root_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -15,9 +15,10 @@ class MyApp extends StatelessWidget {
       title: 'Rutikal',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
       ),
-      home: const MapPage(),
+      home: const RootPage(),
     );
   }
 }
