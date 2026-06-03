@@ -1,48 +1,15 @@
 PODS:
   - Flutter (1.0.0)
-  - geolocator_apple (1.2.0):
-    - Flutter
-    - FlutterMacOS
-  - MapLibre (6.25.1)
-  - maplibre_gl (0.26.0):
-    - Flutter
-    - MapLibre (= 6.25.1)
-  - package_info_plus (0.4.5):
-    - Flutter
-  - sqflite_darwin (0.0.4):
-    - Flutter
-    - FlutterMacOS
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
-  - geolocator_apple (from `.symlinks/plugins/geolocator_apple/darwin`)
-  - maplibre_gl (from `.symlinks/plugins/maplibre_gl/ios`)
-  - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
-  - sqflite_darwin (from `.symlinks/plugins/sqflite_darwin/darwin`)
-
-SPEC REPOS:
-  trunk:
-    - MapLibre
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
-  geolocator_apple:
-    :path: ".symlinks/plugins/geolocator_apple/darwin"
-  maplibre_gl:
-    :path: ".symlinks/plugins/maplibre_gl/ios"
-  package_info_plus:
-    :path: ".symlinks/plugins/package_info_plus/ios"
-  sqflite_darwin:
-    :path: ".symlinks/plugins/sqflite_darwin/darwin"
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  geolocator_apple: 66b711889fd333205763b83c9dcf0a57a28c7afd
-  MapLibre: 117b8f7f7956137697fc72f7485261f65d770091
-  maplibre_gl: 44719322523b9cc0b6888afdca7fc2ab8447087f
-  package_info_plus: c0502532a26c7662a62a356cebe2692ec5fe4ec4
-  sqflite_darwin: 5a7236e3b501866c1c9befc6771dfd73ffb8702d
 
 PODFILE CHECKSUM: 251cb053df7158f337c0712f2ab29f4e0fa474ce
 

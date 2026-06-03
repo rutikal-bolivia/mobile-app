@@ -1,71 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:equatable/equatable.dart';
-
-// ── Bloc Definition for Profile ─────────────────────────────────────────────
-
-abstract class ProfileEvent extends Equatable {
-  const ProfileEvent();
-  @override
-  List<Object?> get props => [];
-}
-
-class ProfileLoadRequested extends ProfileEvent {
-  const ProfileLoadRequested();
-}
-
-abstract class ProfileState extends Equatable {
-  const ProfileState();
-  @override
-  List<Object?> get props => [];
-}
-
-class ProfileInitial extends ProfileState {
-  const ProfileInitial();
-}
-
-class ProfileLoading extends ProfileState {
-  const ProfileLoading();
-}
-
-class ProfileLoaded extends ProfileState {
-  const ProfileLoaded();
-}
-
-class ProfileError extends ProfileState {
-  final String message;
-  const ProfileError({required this.message});
-  @override
-  List<Object?> get props => [message];
-}
-
-class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
-  ProfileBloc() : super(const ProfileInitial()) {
-    on<ProfileLoadRequested>(_onLoadRequested);
-  }
-
-  Future<void> _onLoadRequested(
-    ProfileLoadRequested event,
-    Emitter<ProfileState> emit,
-  ) async {
-    emit(const ProfileLoading());
-    await Future.delayed(const Duration(milliseconds: 300));
-    emit(const ProfileLoaded());
-  }
-}
+import '../../data/datasources/app_database_service.dart';
+import '../../data/repositories/auth_repository.dart';
+import '../bloc/auth_cubit.dart';
+import '../../domain/models/usuario.dart';
+import 'login_page.dart';
+import 'register_page.dart';
 
 // ── User Page Widget ─────────────────────────────────────────────────────────
 
+/// Pestaña de Perfil. Se apoya en el [AuthCubit] provisto en `RootPage`:
+/// muestra los datos reales del usuario autenticado o un estado de invitado con
+/// acceso a las pantallas de inicio de sesión y creación de cuenta.
 class UserPage extends StatelessWidget {
   const UserPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (_) => ProfileBloc()..add(const ProfileLoadRequested()),
-      child: const _ProfileView(),
-    );
+    return const _ProfileView();
   }
 }
 
@@ -76,29 +29,31 @@ class _ProfileView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      body: BlocBuilder<ProfileBloc, ProfileState>(
+      body: BlocBuilder<AuthCubit, AuthState>(
         builder: (context, state) {
-          if (state is ProfileLoading) {
+          if (state.status == AuthStatus.unknown) {
             return const Center(
               child: CircularProgressIndicator(color: Color(0xFFF4C025)),
             );
           }
+
+          final autenticado = state.status == AuthStatus.authenticated &&
+              state.user != null;
+
           return SafeArea(
             child: Column(
               children: [
-                // ── Header ────────────────────────────────────────────────
                 const _Header(),
-                // ── Scrollable body ───────────────────────────────────────
                 Expanded(
                   child: SingleChildScrollView(
-                    child: Column(
-                      children: [
-                        // ── Avatar + nombre + botones ─────────────────────
-                        const _ProfileCard(),
-                        // ── Sección ajustes y cuenta ──────────────────────
-                        const _SettingsSection(),
-                      ],
-                    ),
+                    child: autenticado
+                        ? Column(
+                            children: [
+                              _ProfileCard(user: state.user!),
+                              const _SettingsSection(),
+                            ],
+                          )
+                        : const _GuestCard(),
                   ),
                 ),
               ],
@@ -146,10 +101,130 @@ class _Header extends StatelessWidget {
   }
 }
 
+// ── Estado invitado (sin sesión) ─────────────────────────────────────────────
+
+class _GuestCard extends StatelessWidget {
+  const _GuestCard();
+
+  void _abrirLogin(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BlocProvider.value(
+          value: context.read<AuthCubit>(),
+          child: const LoginPage(),
+        ),
+      ),
+    );
+  }
+
+  void _abrirRegistro(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => BlocProvider.value(
+          value: context.read<AuthCubit>(),
+          child: const RegisterPage(),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
+      child: Column(
+        children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: const BoxDecoration(
+              color: Color(0xFFF1F5F9),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.person_outline_rounded,
+                size: 48, color: Color(0xFF94A3B8)),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'No has iniciado sesión',
+            style: TextStyle(
+              fontFamily: 'Plus Jakarta Sans',
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF0F172A),
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Inicia sesión o crea una cuenta para personalizar tu experiencia en Rutikal.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'Plus Jakarta Sans',
+              fontSize: 14,
+              color: Color(0xFF64748B),
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 28),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              onPressed: () => _abrirLogin(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFF4C025),
+                foregroundColor: const Color(0xFF0F172A),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: const Text(
+                'Iniciar sesión',
+                style: TextStyle(
+                  fontFamily: 'Plus Jakarta Sans',
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: OutlinedButton(
+              onPressed: () => _abrirRegistro(context),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF0F172A),
+                side: const BorderSide(color: Color(0xFFE2E8F0)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: const Text(
+                'Crear cuenta',
+                style: TextStyle(
+                  fontFamily: 'Plus Jakarta Sans',
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Profile card: avatar + nombre + email + botones ──────────────────────────
 
 class _ProfileCard extends StatelessWidget {
-  const _ProfileCard();
+  const _ProfileCard({required this.user});
+
+  final Usuario user;
 
   @override
   Widget build(BuildContext context) {
@@ -166,6 +241,7 @@ class _ProfileCard extends StatelessWidget {
                 height: 128,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
+                  color: const Color(0xFFFEF9E7),
                   border: Border.all(color: const Color(0xFFF4C025), width: 3),
                   boxShadow: const [
                     BoxShadow(
@@ -175,17 +251,14 @@ class _ProfileCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: ClipOval(
-                  child: Image.network(
-                    'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=256&q=80',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: const Color(0xFFF1F5F9),
-                      child: const Icon(
-                        Icons.person_rounded,
-                        size: 64,
-                        color: Color(0xFF94A3B8),
-                      ),
+                child: Center(
+                  child: Text(
+                    user.iniciales,
+                    style: const TextStyle(
+                      fontFamily: 'Plus Jakarta Sans',
+                      fontSize: 44,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFFCA9A04),
                     ),
                   ),
                 ),
@@ -203,14 +276,15 @@ class _ProfileCard extends StatelessWidget {
                     border: Border.all(color: Colors.white, width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 4,
                         offset: const Offset(0, 2),
                       ),
                     ],
                   ),
                   child: const Center(
-                    child: Icon(Icons.edit_rounded, size: 13, color: Color(0xFF0F172A)),
+                    child: Icon(Icons.edit_rounded,
+                        size: 13, color: Color(0xFF0F172A)),
                   ),
                 ),
               ),
@@ -218,9 +292,9 @@ class _ProfileCard extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           // Nombre
-          const Text(
-            'Juan Pérez',
-            style: TextStyle(
+          Text(
+            user.nombreCompleto.isEmpty ? 'Usuario' : user.nombreCompleto,
+            style: const TextStyle(
               fontFamily: 'Plus Jakarta Sans',
               fontSize: 24,
               fontWeight: FontWeight.w700,
@@ -231,9 +305,9 @@ class _ProfileCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           // Email
-          const Text(
-            'juan.perez@example.com',
-            style: TextStyle(
+          Text(
+            user.correo,
+            style: const TextStyle(
               fontFamily: 'Plus Jakarta Sans',
               fontSize: 14,
               fontWeight: FontWeight.w400,
@@ -241,63 +315,25 @@ class _ProfileCard extends StatelessWidget {
               height: 1.5,
             ),
           ),
-          const SizedBox(height: 24),
-          // Botones
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Editar Perfil
-              GestureDetector(
-                onTap: () {},
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(9999),
-                  ),
-                  child: const Text(
-                    'Editar Perfil',
-                    style: TextStyle(
-                      fontFamily: 'Plus Jakarta Sans',
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF334155),
-                      height: 1.428,
-                    ),
-                  ),
+          if (user.tipoUsuarioNombre != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(9999),
+              ),
+              child: Text(
+                user.tipoUsuarioNombre!,
+                style: const TextStyle(
+                  fontFamily: 'Plus Jakarta Sans',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF475569),
                 ),
               ),
-              const SizedBox(width: 8),
-              // Premium
-              GestureDetector(
-                onTap: () {},
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF4C025),
-                    borderRadius: BorderRadius.circular(9999),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 1,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: const Text(
-                    'Premium',
-                    style: TextStyle(
-                      fontFamily: 'Plus Jakarta Sans',
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF0F172A),
-                      height: 1.428,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     );
@@ -308,6 +344,49 @@ class _ProfileCard extends StatelessWidget {
 
 class _SettingsSection extends StatelessWidget {
   const _SettingsSection();
+
+  Future<void> _confirmarCerrarSesion(BuildContext context) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Cerrar sesión',
+          style: TextStyle(
+            fontFamily: 'Plus Jakarta Sans',
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF0F172A),
+          ),
+        ),
+        content: const Text(
+          '¿Seguro que quieres cerrar tu sesión?',
+          style: TextStyle(
+            fontFamily: 'Plus Jakarta Sans',
+            color: Color(0xFF475569),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('Cancelar',
+                style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            child: const Text('Cerrar sesión',
+                style: TextStyle(
+                    color: Color(0xFFEF4444), fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar == true && context.mounted) {
+      await context.read<AuthCubit>().logout();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -361,7 +440,8 @@ class _SettingsSection extends StatelessWidget {
               // Divisor
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Divider(color: Color(0xFFF1F5F9), thickness: 1, height: 1),
+                child: Divider(
+                    color: Color(0xFFF1F5F9), thickness: 1, height: 1),
               ),
               // Cerrar sesión
               _SettingsItem(
@@ -371,7 +451,7 @@ class _SettingsSection extends StatelessWidget {
                 title: 'Cerrar sesión',
                 titleColor: const Color(0xFFEF4444),
                 showChevron: false,
-                onTap: () {},
+                onTap: () => _confirmarCerrarSesion(context),
               ),
             ],
           ),
@@ -472,4 +552,9 @@ class _SettingsItem extends StatelessWidget {
 
 // Previsualización oficial para VS Code
 @Preview(name: 'User Page')
-Widget previewUser() => const UserPage();
+Widget previewUser() => BlocProvider(
+      create: (_) => AuthCubit(
+        repository: AuthRepository(dbService: AppDatabaseService()),
+      )..loadSession(),
+      child: const UserPage(),
+    );

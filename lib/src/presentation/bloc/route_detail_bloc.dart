@@ -38,6 +38,13 @@ class RouteDetailBloc extends Bloc<RouteDetailEvent, RouteDetailState> {
   Future<void> close() {
     _syncSub?.cancel();
     return super.close();
+    on<RouteDetailStopFavoriteToggled>(_onStopFavoriteToggled);
+  }
+
+  /// Devuelve el conjunto de ids de paradas marcadas como favoritas.
+  Future<Set<int>> _loadFavoriteStopIds() async {
+    final stops = await favoritesRepository.getFavoriteStops();
+    return stops.map((s) => s.id).toSet();
   }
 
   Future<void> _onLoadRequested(
@@ -47,19 +54,49 @@ class RouteDetailBloc extends Bloc<RouteDetailEvent, RouteDetailState> {
     _currentRouteId = event.routeId;
     emit(const RouteDetailLoading());
     try {
-      final stops = await repository.getRouteStops(event.routeId, event.sentido);
-      final trajectory = await repository.getRouteTrajectory(event.routeId, event.sentido);
+      var sentido = event.sentido;
+      var stops = await repository.getRouteStops(event.routeId, sentido);
+
+      // Si pidieron enfocar una parada y no está en este sentido, probamos el
+      // otro (una parada puede existir solo en ida o solo en vuelta).
+      RouteStop? focusStop;
+      if (event.focusStopId != null) {
+        focusStop = _buscarParada(stops, event.focusStopId!);
+        if (focusStop == null) {
+          final otroSentido = sentido == 1 ? 2 : 1;
+          final otrasStops =
+              await repository.getRouteStops(event.routeId, otroSentido);
+          final enOtro = _buscarParada(otrasStops, event.focusStopId!);
+          if (enOtro != null) {
+            sentido = otroSentido;
+            stops = otrasStops;
+            focusStop = enOtro;
+          }
+        }
+      }
+
+      final trajectory =
+          await repository.getRouteTrajectory(event.routeId, sentido);
       final isFav = await favoritesRepository.isFavorite('ruta', event.routeId);
+      final favStopIds = await _loadFavoriteStopIds();
       emit(RouteDetailLoaded(
         stops: stops,
         trajectory: trajectory,
-        sentido: event.sentido,
-        selectedStop: null,
+        sentido: sentido,
+        selectedStop: focusStop,
         isFavorite: isFav,
+        favoriteStopIds: favStopIds,
       ));
     } catch (e) {
       emit(RouteDetailError('Error al cargar detalle de ruta: $e'));
     }
+  }
+
+  RouteStop? _buscarParada(List<RouteStop> stops, int paradaId) {
+    for (final s in stops) {
+      if (s.id == paradaId) return s;
+    }
+    return null;
   }
 
   Future<void> _onSentidoChanged(
@@ -71,12 +108,14 @@ class RouteDetailBloc extends Bloc<RouteDetailEvent, RouteDetailState> {
       final stops = await repository.getRouteStops(event.routeId, event.sentido);
       final trajectory = await repository.getRouteTrajectory(event.routeId, event.sentido);
       final isFav = await favoritesRepository.isFavorite('ruta', event.routeId);
+      final favStopIds = await _loadFavoriteStopIds();
       emit(RouteDetailLoaded(
         stops: stops,
         trajectory: trajectory,
         sentido: event.sentido,
         selectedStop: null,
         isFavorite: isFav,
+        favoriteStopIds: favStopIds,
       ));
     } catch (e) {
       emit(RouteDetailError('Error al cambiar de sentido: $e'));
@@ -112,6 +151,31 @@ class RouteDetailBloc extends Bloc<RouteDetailEvent, RouteDetailState> {
       } catch (e) {
         emit(RouteDetailError('Error al alternar favorito: $e'));
       }
+    }
+  }
+
+  Future<void> _onStopFavoriteToggled(
+    RouteDetailStopFavoriteToggled event,
+    Emitter<RouteDetailState> emit,
+  ) async {
+    final currentState = state;
+    if (currentState is! RouteDetailLoaded) return;
+    try {
+      final yaEsFav = currentState.favoriteStopIds.contains(event.stopId);
+      if (yaEsFav) {
+        await favoritesRepository.removeFavorite('parada', event.stopId);
+      } else {
+        await favoritesRepository.addFavorite('parada', event.stopId);
+      }
+      final nuevos = Set<int>.from(currentState.favoriteStopIds);
+      if (yaEsFav) {
+        nuevos.remove(event.stopId);
+      } else {
+        nuevos.add(event.stopId);
+      }
+      emit(currentState.copyWith(favoriteStopIds: nuevos));
+    } catch (e) {
+      emit(RouteDetailError('Error al alternar favorito de parada: $e'));
     }
   }
 }

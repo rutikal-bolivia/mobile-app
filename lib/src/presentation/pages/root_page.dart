@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../data/datasources/app_database_service.dart';
+import '../../data/repositories/auth_repository.dart';
+import '../bloc/auth_cubit.dart';
 import '../bloc/navigation_cubit.dart';
 import '../bloc/routing_bloc.dart';
 import '../bloc/routing_event.dart';
@@ -30,6 +32,11 @@ class RootPage extends StatelessWidget {
           lazy: false,
           create: (context) => SyncCubit(dbService: AppDatabaseService())
             ..synchronize(),
+        ),
+        BlocProvider(
+          create: (context) => AuthCubit(
+            repository: AuthRepository(dbService: AppDatabaseService()),
+          )..loadSession(),
         ),
       ],
       child: const _RootPageContent(),

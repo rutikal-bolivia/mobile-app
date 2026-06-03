@@ -79,6 +79,12 @@ class AppDatabaseService {
         await File('$dbPath.version')
             .writeAsString(_kAssetVersion.toString(), flush: true);
         await db.execute('''
+          CREATE TABLE IF NOT EXISTS sync_meta (
+            clave TEXT PRIMARY KEY,
+            valor TEXT
+          )
+        ''');
+        await db.execute('''
           CREATE TABLE IF NOT EXISTS favoritos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tipo TEXT NOT NULL,

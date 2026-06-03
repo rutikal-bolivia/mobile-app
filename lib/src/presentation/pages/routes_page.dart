@@ -333,12 +333,12 @@ class _RoutesList extends StatelessWidget {
         }
 
         final r = routes[index - 1];
-        
+
         // Formatear el código de ruta
-        final String routeCode = tab == 0 
-            ? 'PU-${r.id}' 
+        final String routeCode = tab == 0
+            ? 'PU-${r.id}'
             : 'TF-${r.id}';
-        
+
         // Formatear la descripción
         final String routeDesc = r.descripcion ?? r.nombreIda ?? 'Línea de transporte';
 

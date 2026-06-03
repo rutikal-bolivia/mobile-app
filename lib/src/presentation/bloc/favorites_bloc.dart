@@ -18,6 +18,8 @@ class FavoritesBloc extends Bloc<FavoritesEvent, FavoritesState> {
   ) async {
     emit(const FavoritesLoading());
     try {
+      // Reconcilia con la cuenta si hay sesión; sin sesión es un no-op.
+      await repository.syncWithBackend();
       final routes = await repository.getFavoriteRoutes();
       final stops = await repository.getFavoriteStops();
       emit(FavoritesLoaded(favoriteRoutes: routes, favoriteStops: stops));

@@ -124,6 +124,12 @@ class MockRoutesRepository implements RoutesRepository {
   }
 
   @override
+  Future<LocalRoute?> getRouteForStop(int paradaId) async {
+    await Future.delayed(const Duration(milliseconds: 100));
+    return _pumaRoutes.first;
+  }
+
+  @override
   Future<List<List<double>>> getRouteTrajectory(int routeId, int sentido) async {
     // Retorna una trayectoria de puntos simulada
     return [

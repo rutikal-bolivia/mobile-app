@@ -65,6 +65,31 @@ class RoutesRepositoryImpl implements RoutesRepository {
   }
 
   @override
+  Future<LocalRoute?> getRouteForStop(int paradaId) async {
+    final db = await dbService.database;
+    final List<Map<String, dynamic>> maps = await db.rawQuery('''
+      SELECT DISTINCT r.*
+      FROM rutas_paradas rp
+      JOIN rutas r ON rp.ruta_id = r.id
+      WHERE rp.parada_id = ? AND r.activo = 1
+      ORDER BY r.nombre ASC
+      LIMIT 1
+    ''', [paradaId]);
+
+    if (maps.isEmpty) return null;
+    final m = maps.first;
+    return LocalRoute(
+      id: m['id'] as int,
+      transporteId: m['transporte_id'] as int,
+      nombre: m['nombre'] as String,
+      nombreIda: m['nombre_ida'] as String?,
+      nombreVuelta: m['nombre_vuelta'] as String?,
+      descripcion: m['descripcion'] as String?,
+      color: m['color'] as String?,
+    );
+  }
+
+  @override
   Future<List<List<double>>> getRouteTrajectory(int routeId, int sentido) async {
     final db = await dbService.database;
     final List<Map<String, dynamic>> maps = await db.rawQuery('''

@@ -12,10 +12,18 @@ class RouteDetailLoadRequested extends RouteDetailEvent {
   final int routeId;
   final int sentido;
 
-  const RouteDetailLoadRequested({required this.routeId, this.sentido = 1});
+  /// Si se indica, al cargar se selecciona esta parada (buscándola en el
+  /// sentido correcto) para centrar el mapa y mostrar su globo.
+  final int? focusStopId;
+
+  const RouteDetailLoadRequested({
+    required this.routeId,
+    this.sentido = 1,
+    this.focusStopId,
+  });
 
   @override
-  List<Object?> get props => [routeId, sentido];
+  List<Object?> get props => [routeId, sentido, focusStopId];
 }
 
 class RouteDetailSentidoChanged extends RouteDetailEvent {
@@ -44,4 +52,14 @@ class RouteDetailFavoriteToggled extends RouteDetailEvent {
 
   @override
   List<Object?> get props => [routeId];
+}
+
+/// Marca/desmarca una parada concreta como favorita desde el detalle de ruta.
+class RouteDetailStopFavoriteToggled extends RouteDetailEvent {
+  final int stopId;
+
+  const RouteDetailStopFavoriteToggled({required this.stopId});
+
+  @override
+  List<Object?> get props => [stopId];
 }
