@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import '../../../core/app_config.dart';
 import '../../data/datasources/app_database_service.dart';
 import '../../data/repositories/content_repository.dart';
 import '../../domain/models/alerta.dart';
@@ -9,6 +10,8 @@ import '../../domain/models/noticia.dart';
 import '../widgets/app_header_widget.dart';
 import '../widgets/news_card_large_widget.dart';
 import '../widgets/news_card_small_widget.dart';
+import 'noticia_detail_page.dart';
+import 'notifications_page.dart';
 
 // ── Eventos ──────────────────────────────────────────────────────────────────
 
@@ -24,6 +27,12 @@ class HomeLoadRequested extends HomeEvent {
 
 class HomeRefreshRequested extends HomeEvent {
   const HomeRefreshRequested();
+}
+
+/// El usuario abrió la bandeja de notificaciones: persistimos la marca de
+/// tiempo y reseteamos el contador de no leídas.
+class HomeNotificationsSeen extends HomeEvent {
+  const HomeNotificationsSeen();
 }
 
 // ── Estados ───────────────────────────────────────────────────────────────────
@@ -47,14 +56,38 @@ class HomeLoaded extends HomeState {
     required this.noticias,
     required this.alertas,
     this.isFromCache = false,
+    this.vistoEn,
+    this.unreadCount = 0,
   });
 
   final List<Noticia> noticias;
   final List<Alerta> alertas;
   final bool isFromCache;
 
+  /// Marca de tiempo de la última revisión de notificaciones.
+  final DateTime? vistoEn;
+
+  /// Cantidad de noticias/alertas posteriores a [vistoEn].
+  final int unreadCount;
+
+  HomeLoaded copyWith({
+    List<Noticia>? noticias,
+    List<Alerta>? alertas,
+    bool? isFromCache,
+    DateTime? vistoEn,
+    int? unreadCount,
+  }) =>
+      HomeLoaded(
+        noticias: noticias ?? this.noticias,
+        alertas: alertas ?? this.alertas,
+        isFromCache: isFromCache ?? this.isFromCache,
+        vistoEn: vistoEn ?? this.vistoEn,
+        unreadCount: unreadCount ?? this.unreadCount,
+      );
+
   @override
-  List<Object?> get props => [noticias, alertas, isFromCache];
+  List<Object?> get props =>
+      [noticias, alertas, isFromCache, vistoEn, unreadCount];
 }
 
 class HomeError extends HomeState {
@@ -72,6 +105,7 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
         super(const HomeInitial()) {
     on<HomeLoadRequested>(_onLoad);
     on<HomeRefreshRequested>(_onRefresh);
+    on<HomeNotificationsSeen>(_onNotificationsSeen);
   }
 
   final ContentRepository _contentRepository;
@@ -87,14 +121,47 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
     await _fetch(emit);
   }
 
+  Future<void> _onNotificationsSeen(
+      HomeNotificationsSeen event, Emitter<HomeState> emit) async {
+    final ahora = DateTime.now();
+    await _contentRepository.marcarNotificacionesVistas(ahora);
+    final state = this.state;
+    if (state is HomeLoaded) {
+      emit(state.copyWith(vistoEn: ahora, unreadCount: 0));
+    }
+  }
+
+  /// Cuenta cuántas noticias/alertas tienen una fecha posterior a [vistoEn].
+  int _contarNoLeidas(
+    List<Noticia> noticias,
+    List<Alerta> alertas,
+    DateTime? vistoEn,
+  ) {
+    final fechasNoticias =
+        noticias.map((n) => n.fechaPublicacion ?? n.updatedAt);
+    final fechasAlertas = alertas.map((a) => a.fechaInicio ?? a.updatedAt);
+    final fechas = [...fechasNoticias, ...fechasAlertas].whereType<DateTime>();
+    // Primera apertura (sin marca previa): todo el contenido cuenta como nuevo,
+    // consistente con cómo NotificationsPage resalta los elementos.
+    if (vistoEn == null) return fechas.length;
+    return fechas.where((f) => f.isAfter(vistoEn)).length;
+  }
+
   Future<void> _fetch(Emitter<HomeState> emit) async {
     final noticiaResult = await _contentRepository.getNoticias();
     final alertaResult = await _contentRepository.getAlertas();
+    final vistoEn = await _contentRepository.getNotificacionesVistoEn();
 
     emit(HomeLoaded(
       noticias: noticiaResult.items,
       alertas: alertaResult.items,
       isFromCache: noticiaResult.isFromCache || alertaResult.isFromCache,
+      vistoEn: vistoEn,
+      unreadCount: _contarNoLeidas(
+        noticiaResult.items,
+        alertaResult.items,
+        vistoEn,
+      ),
     ));
   }
 }
@@ -133,13 +200,28 @@ class _HomeView extends StatelessWidget {
           final noticias = state is HomeLoaded ? state.noticias : <Noticia>[];
           final alertas = state is HomeLoaded ? state.alertas : <Alerta>[];
           final isFromCache = state is HomeLoaded && state.isFromCache;
+          final unreadCount = state is HomeLoaded ? state.unreadCount : 0;
+          final vistoEn = state is HomeLoaded ? state.vistoEn : null;
 
           return SafeArea(
             child: Column(
               children: [
                 AppHeaderWidget(
                   onMenuTap: () {},
-                  onNotificationTap: () {},
+                  unreadCount: unreadCount,
+                  onNotificationTap: () {
+                    final bloc = context.read<HomeBloc>();
+                    bloc.add(const HomeNotificationsSeen());
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => NotificationsPage(
+                          noticias: noticias,
+                          alertas: alertas,
+                          vistoEn: vistoEn,
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 if (isFromCache)
                   _OfflineBanner(),
@@ -298,6 +380,14 @@ class _NoticiasSection extends StatelessWidget {
     return '${date.day}/${date.month}/${date.year}';
   }
 
+  void _abrirNoticia(BuildContext context, Noticia noticia) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NoticiaDetailPage(noticia: noticia),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (noticias.isEmpty) {
@@ -323,20 +413,20 @@ class _NoticiasSection extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         NewsCardLargeWidget(
-          imageUrl: primera.imagen ?? '',
+          imageUrl: AppConfig.mediaUrl(primera.imagen),
           title: primera.titulo,
           description: primera.descripcion ?? '',
           timeAgo: _timeAgo(primera.fechaPublicacion),
-          onReadMore: () {},
+          onReadMore: () => _abrirNoticia(context, primera),
         ),
         ...resto.map((n) => Padding(
               padding: const EdgeInsets.only(top: 8),
               child: NewsCardSmallWidget(
-                imageUrl: n.imagen ?? '',
+                imageUrl: AppConfig.mediaUrl(n.imagen),
                 title: n.titulo,
                 description: n.descripcion ?? '',
                 date: _timeAgo(n.fechaPublicacion),
-                onTap: () {},
+                onTap: () => _abrirNoticia(context, n),
               ),
             )),
       ],

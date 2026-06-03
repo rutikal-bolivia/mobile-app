@@ -69,4 +69,9 @@ abstract class RoutesRepository {
   Future<List<LocalRoute>> getRoutesByTransport(int transporteId);
   Future<List<RouteStop>> getRouteStops(int routeId, int sentido);
   Future<List<List<double>>> getRouteTrajectory(int routeId, int sentido);
+
+  /// Devuelve la primera ruta activa que pasa por la parada [paradaId], o
+  /// `null` si la parada no pertenece a ninguna ruta. Útil para abrir el
+  /// detalle (mapa + trazado) de una parada favorita.
+  Future<LocalRoute?> getRouteForStop(int paradaId);
 }

@@ -5,6 +5,8 @@ class PumaRouteCardWidget extends StatelessWidget {
   final String routeCode;
   final String routeDescription;
   final VoidCallback? onTap;
+  final bool isFavorite;
+  final VoidCallback? onFavoriteTap;
 
   const PumaRouteCardWidget({
     super.key,
@@ -12,6 +14,8 @@ class PumaRouteCardWidget extends StatelessWidget {
     required this.routeCode,
     required this.routeDescription,
     this.onTap,
+    this.isFavorite = false,
+    this.onFavoriteTap,
   });
 
   @override
@@ -44,6 +48,8 @@ class PumaRouteCardWidget extends StatelessWidget {
                 children: [
                   Text(
                     routeName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontFamily: 'Plus Jakarta Sans',
                       fontSize: 16,
@@ -54,6 +60,8 @@ class PumaRouteCardWidget extends StatelessWidget {
                   ),
                   Text(
                     '$routeCode • $routeDescription',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontFamily: 'Plus Jakarta Sans',
                       fontSize: 12,
@@ -65,6 +73,22 @@ class PumaRouteCardWidget extends StatelessWidget {
                 ],
               ),
             ),
+            // Estrella de favorito (inline, no se superpone al texto)
+            if (onFavoriteTap != null) ...[
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: onFavoriteTap,
+                behavior: HitTestBehavior.opaque,
+                child: Icon(
+                  isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+                  size: 22,
+                  color: isFavorite
+                      ? const Color(0xFFF4C025)
+                      : const Color(0xFF94A3B8),
+                ),
+              ),
+            ],
+            const SizedBox(width: 4),
             // Chevron
             const Icon(
               Icons.chevron_right,

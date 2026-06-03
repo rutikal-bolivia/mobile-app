@@ -50,10 +50,15 @@ class RouteDetailPage extends StatelessWidget {
   final LocalRoute route;
   final RoutesRepository? routesRepository;
 
+  /// Si se provee, al cargar se enfoca esta parada en el mapa (p. ej. al abrir
+  /// el detalle desde una parada favorita).
+  final int? initialStopId;
+
   const RouteDetailPage({
     super.key,
     required this.route,
     this.routesRepository,
+    this.initialStopId,
   });
 
   @override
@@ -65,7 +70,11 @@ class RouteDetailPage extends StatelessWidget {
           create: (_) => RouteDetailBloc(
             repository: repo,
             favoritesRepository: FavoritesRepositoryImpl(dbService: AppDatabaseService()),
-          )..add(RouteDetailLoadRequested(routeId: route.id, sentido: 1)),
+          )..add(RouteDetailLoadRequested(
+              routeId: route.id,
+              sentido: 1,
+              focusStopId: initialStopId,
+            )),
         ),
         BlocProvider(
           create: (_) => LocationBloc(repository: LocationRepositoryImpl())
@@ -198,6 +207,8 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
           final List<RouteStop> stops = state is RouteDetailLoaded ? state.stops : [];
           final List<List<double>> trajectory = state is RouteDetailLoaded ? state.trajectory : [];
           final int sentido = state is RouteDetailLoaded ? state.sentido : 1;
+          final Set<int> favoriteStopIds =
+              state is RouteDetailLoaded ? state.favoriteStopIds : <int>{};
 
           return Stack(
             children: [
@@ -545,7 +556,9 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                           itemBuilder: (context, index) {
                             final stop = stops[index];
                             final isSelected = _selectedStop?.id == stop.id;
-                            
+                            final isStopFav =
+                                favoriteStopIds.contains(stop.id);
+
                             return ListTile(
                               contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
                               leading: Container(
@@ -593,17 +606,58 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                                       ),
                                     )
                                   : null,
-                              trailing: stop.latitud == null || stop.longitud == null
-                                  ? const Icon(
-                                      Icons.location_off_rounded,
-                                      color: Color(0xFFCBD5E1),
-                                      size: 16,
-                                    )
-                                  : Icon(
-                                      Icons.arrow_forward_ios_rounded,
-                                      color: isSelected ? routeColor : const Color(0xFF94A3B8),
-                                      size: 12,
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Botón para guardar la parada como favorita
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      context.read<RouteDetailBloc>().add(
+                                            RouteDetailStopFavoriteToggled(
+                                                stopId: stop.id),
+                                          );
+                                      ScaffoldMessenger.of(context)
+                                        ..hideCurrentSnackBar()
+                                        ..showSnackBar(
+                                          SnackBar(
+                                            duration:
+                                                const Duration(seconds: 1),
+                                            content: Text(isStopFav
+                                                ? 'Parada quitada de favoritos'
+                                                : 'Parada guardada en favoritos'),
+                                          ),
+                                        );
+                                    },
+                                    child: Padding(
+                                      padding:
+                                          const EdgeInsets.only(right: 4),
+                                      child: Icon(
+                                        isStopFav
+                                            ? Icons.star_rounded
+                                            : Icons.star_border_rounded,
+                                        color: isStopFav
+                                            ? const Color(0xFFF4C025)
+                                            : const Color(0xFF94A3B8),
+                                        size: 22,
+                                      ),
                                     ),
+                                  ),
+                                  stop.latitud == null || stop.longitud == null
+                                      ? const Icon(
+                                          Icons.location_off_rounded,
+                                          color: Color(0xFFCBD5E1),
+                                          size: 16,
+                                        )
+                                      : Icon(
+                                          Icons.arrow_forward_ios_rounded,
+                                          color: isSelected
+                                              ? routeColor
+                                              : const Color(0xFF94A3B8),
+                                          size: 12,
+                                        ),
+                                ],
+                              ),
                               onTap: () {
                                 if (stop.latitud != null && stop.longitud != null) {
                                   setState(() {

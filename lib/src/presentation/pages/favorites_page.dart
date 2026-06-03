@@ -3,10 +3,12 @@ import 'package:flutter/widget_previews.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../data/datasources/app_database_service.dart';
 import '../../data/repositories/favorites_repository_impl.dart';
+import '../../data/repositories/routes_repository_impl.dart';
 import '../../domain/repositories/routes_repository.dart';
 import '../bloc/favorites_bloc.dart';
 import '../bloc/favorites_event.dart';
 import '../bloc/favorites_state.dart';
+import '../bloc/navigation_cubit.dart';
 import '../widgets/tab_selector_widget.dart';
 import '../widgets/focus_button_widget.dart';
 import '../widgets/puma_route_card_widget.dart';
@@ -44,7 +46,15 @@ class FavoritesPage extends StatelessWidget {
       create: (_) => FavoritesBloc(
         repository: FavoritesRepositoryImpl(dbService: AppDatabaseService()),
       )..add(const FavoritesLoadRequested()),
-      child: const _FavoritesView(),
+      // La pestaña vive en un IndexedStack (se construye una sola vez), así que
+      // recargamos los favoritos cada vez que el usuario entra a esta pestaña
+      // (índice 3) para reflejar lo que se marcó desde el detalle de ruta.
+      child: BlocListener<NavigationCubit, int>(
+        listenWhen: (previous, current) => current == 3 && previous != 3,
+        listener: (context, _) =>
+            context.read<FavoritesBloc>().add(const FavoritesLoadRequested()),
+        child: const _FavoritesView(),
+      ),
     );
   }
 }
@@ -131,6 +141,31 @@ class _FavoritesViewState extends State<_FavoritesView> {
     );
   }
 
+  /// Abre el detalle (mapa + trazado) de la ruta a la que pertenece la parada
+  /// favorita, enfocando esa parada.
+  Future<void> _abrirRutaDeParada(BuildContext context, RouteStop stop) async {
+    final repo = RoutesRepositoryImpl(dbService: AppDatabaseService());
+    final route = await repo.getRouteForStop(stop.id);
+    if (!context.mounted) return;
+    if (route == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Esta parada no pertenece a ninguna ruta activa.'),
+        ),
+      );
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RouteDetailPage(route: route, initialStopId: stop.id),
+      ),
+    );
+    if (context.mounted) {
+      context.read<FavoritesBloc>().add(const FavoritesLoadRequested());
+    }
+  }
+
   Widget _buildFavoritesList(List<LocalRoute> routes, List<RouteStop> stops) {
     if (_selectedTab == 0) {
       return Column(
@@ -169,41 +204,29 @@ class _FavoritesViewState extends State<_FavoritesView> {
               final routeDesc = r.descripcion ?? r.nombreIda ?? 'Ruta de transporte';
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Stack(
-                  alignment: Alignment.centerRight,
-                  children: [
-                    PumaRouteCardWidget(
-                      routeName: r.nombre,
-                      routeCode: routeCode,
-                      routeDescription: routeDesc,
-                      onTap: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => RouteDetailPage(route: r),
-                          ),
+                child: PumaRouteCardWidget(
+                  routeName: r.nombre,
+                  routeCode: routeCode,
+                  routeDescription: routeDesc,
+                  isFavorite: true,
+                  onFavoriteTap: () {
+                    context.read<FavoritesBloc>().add(
+                          FavoriteRemoved(tipo: 'ruta', referenciaId: r.id),
                         );
-                        if (context.mounted) {
-                          context.read<FavoritesBloc>().add(const FavoritesLoadRequested());
-                        }
-                      },
-                    ),
-                    Positioned(
-                      right: 40,
-                      child: GestureDetector(
-                        onTap: () {
-                          context.read<FavoritesBloc>().add(
-                            FavoriteRemoved(tipo: 'ruta', referenciaId: r.id),
-                          );
-                        },
-                        child: const Icon(
-                          Icons.star_rounded,
-                          color: Color(0xFFF4C025),
-                          size: 24,
-                        ),
+                  },
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => RouteDetailPage(route: r),
                       ),
-                    ),
-                  ],
+                    );
+                    if (context.mounted) {
+                      context
+                          .read<FavoritesBloc>()
+                          .add(const FavoritesLoadRequested());
+                    }
+                  },
                 ),
               );
             },
@@ -245,7 +268,10 @@ class _FavoritesViewState extends State<_FavoritesView> {
               final s = stops[index];
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Container(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _abrirRutaDeParada(context, s),
+                  child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -276,6 +302,8 @@ class _FavoritesViewState extends State<_FavoritesView> {
                           children: [
                             Text(
                               s.nombre,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontFamily: 'Plus Jakarta Sans',
                                 fontSize: 15,
@@ -286,6 +314,8 @@ class _FavoritesViewState extends State<_FavoritesView> {
                             if (s.direccion != null && s.direccion!.isNotEmpty)
                               Text(
                                 s.direccion!,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   fontFamily: 'Plus Jakarta Sans',
                                   fontSize: 12,
@@ -309,6 +339,7 @@ class _FavoritesViewState extends State<_FavoritesView> {
                       ),
                     ],
                   ),
+                ),
                 ),
               );
             },
@@ -334,7 +365,9 @@ class _FavoritesViewState extends State<_FavoritesView> {
               : 'Buscar paradas',
           icon: Icons.search_rounded,
           size: FocusButtonSize.large,
-          onTap: () {},
+          // Ambos llevan a la pestaña de Rutas (índice 2): las rutas se exploran
+          // ahí y las paradas se ven al abrir el detalle de una ruta.
+          onTap: () => context.read<NavigationCubit>().changeTab(2),
         ),
         const SizedBox(height: 48),
         // ── Suggestions section ───────────────────────
@@ -659,4 +692,7 @@ class _SuggestionCard extends StatelessWidget {
 
 // Previsualización oficial para VS Code
 @Preview(name: 'Favorites Page')
-Widget previewFavorites() => const FavoritesPage();
+Widget previewFavorites() => BlocProvider(
+      create: (_) => NavigationCubit(),
+      child: const FavoritesPage(),
+    );

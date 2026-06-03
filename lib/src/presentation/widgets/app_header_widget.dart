@@ -4,11 +4,13 @@ import '../../../../core/theme/app_colors.dart';
 class AppHeaderWidget extends StatelessWidget {
   final VoidCallback? onMenuTap;
   final VoidCallback? onNotificationTap;
+  final int unreadCount;
 
   const AppHeaderWidget({
     super.key,
     this.onMenuTap,
     this.onNotificationTap,
+    this.unreadCount = 0,
   });
 
   @override
@@ -63,21 +65,53 @@ class AppHeaderWidget extends StatelessWidget {
           // Notification button
           GestureDetector(
             onTap: onNotificationTap,
+            behavior: HitTestBehavior.opaque,
             child: SizedBox(
               width: 48,
               height: 48,
               child: Center(
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.notifications_none_rounded,
-                    size: 22,
-                    color: Color(0xFF1E293B),
-                  ),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.notifications_none_rounded,
+                        size: 22,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    if (unreadCount > 0)
+                      Positioned(
+                        right: 2,
+                        top: 2,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          constraints: const BoxConstraints(minWidth: 18),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDC2626),
+                            borderRadius: BorderRadius.circular(9),
+                            border: Border.all(color: AppColors.white, width: 1.5),
+                          ),
+                          child: Text(
+                            unreadCount > 9 ? '9+' : '$unreadCount',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontFamily: 'Plus Jakarta Sans',
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),

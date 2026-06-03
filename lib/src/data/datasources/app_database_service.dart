@@ -64,6 +64,12 @@ class AppDatabaseService {
       onCreate: _onCreate,
       onOpen: (db) async {
         await db.execute('''
+          CREATE TABLE IF NOT EXISTS sync_meta (
+            clave TEXT PRIMARY KEY,
+            valor TEXT
+          )
+        ''');
+        await db.execute('''
           CREATE TABLE IF NOT EXISTS favoritos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tipo TEXT NOT NULL,

@@ -22,6 +22,7 @@ class RouteDetailLoaded extends RouteDetailState {
   final int sentido; // 1 = ida, 2 = vuelta
   final RouteStop? selectedStop;
   final bool isFavorite;
+  final Set<int> favoriteStopIds;
 
   const RouteDetailLoaded({
     required this.stops,
@@ -29,6 +30,7 @@ class RouteDetailLoaded extends RouteDetailState {
     required this.sentido,
     this.selectedStop,
     this.isFavorite = false,
+    this.favoriteStopIds = const {},
   });
 
   RouteDetailLoaded copyWith({
@@ -37,6 +39,7 @@ class RouteDetailLoaded extends RouteDetailState {
     int? sentido,
     RouteStop? Function()? selectedStop,
     bool? isFavorite,
+    Set<int>? favoriteStopIds,
   }) {
     return RouteDetailLoaded(
       stops: stops ?? this.stops,
@@ -44,11 +47,13 @@ class RouteDetailLoaded extends RouteDetailState {
       sentido: sentido ?? this.sentido,
       selectedStop: selectedStop != null ? selectedStop() : this.selectedStop,
       isFavorite: isFavorite ?? this.isFavorite,
+      favoriteStopIds: favoriteStopIds ?? this.favoriteStopIds,
     );
   }
 
   @override
-  List<Object?> get props => [stops, trajectory, sentido, selectedStop, isFavorite];
+  List<Object?> get props =>
+      [stops, trajectory, sentido, selectedStop, isFavorite, favoriteStopIds];
 }
 
 class RouteDetailError extends RouteDetailState {

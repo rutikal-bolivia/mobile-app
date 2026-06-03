@@ -117,4 +117,35 @@ class ContentRepository {
         .where((a) => a.vigente)
         .toList();
   }
+
+  // ── Notificaciones (campanita) ────────────────────────────────────────────
+
+  static const _kLastSeenKey = 'notificaciones_visto_en';
+
+  /// Marca de tiempo en la que el usuario abrió por última vez la bandeja de
+  /// notificaciones. Las noticias/alertas más recientes que esta fecha se
+  /// consideran "no leídas".
+  Future<DateTime?> getNotificacionesVistoEn() async {
+    final db = await dbService.database;
+    final rows = await db.query(
+      'sync_meta',
+      where: 'clave = ?',
+      whereArgs: [_kLastSeenKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final valor = rows.first['valor'] as String?;
+    return valor != null ? DateTime.tryParse(valor) : null;
+  }
+
+  /// Persiste la fecha en que se revisaron las notificaciones (por defecto
+  /// ahora), dejando el contador de no leídas en cero.
+  Future<void> marcarNotificacionesVistas([DateTime? cuando]) async {
+    final db = await dbService.database;
+    await db.insert(
+      'sync_meta',
+      {'clave': _kLastSeenKey, 'valor': (cuando ?? DateTime.now()).toIso8601String()},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
 }
