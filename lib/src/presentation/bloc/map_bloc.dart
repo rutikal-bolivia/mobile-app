@@ -21,6 +21,7 @@ class MapBloc extends Bloc<MapEvent, MapState> {
     on<MapShowSearchResultRequested>(_onShowSearchResultRequested);
     on<MapZoomInRequested>(_onZoomInRequested);
     on<MapZoomOutRequested>(_onZoomOutRequested);
+    on<MapAppResumed>(_onAppResumed);
   }
 
   final MapRepository _repository;
@@ -132,6 +133,21 @@ class MapBloc extends Bloc<MapEvent, MapState> {
     }
   }
   
+
+  Future<void> _onAppResumed(MapAppResumed event, Emitter<MapState> emit) async {
+    if (state is! MapReady) return;
+
+    // Si el servidor local sigue vivo no hacemos nada (evita parpadeos).
+    if (await _repository.isLocalServerHealthy()) return;
+
+    debugPrint('[MAP] Servidor local caído tras resume: reconstruyendo.');
+    try {
+      final style = await _repository.prepareOfflineStyle();
+      emit((state as MapReady).copyWith(styleString: style));
+    } catch (e) {
+      emit(MapFailure(message: e.toString()));
+    }
+  }
 
   @override
   Future<void> close() async {

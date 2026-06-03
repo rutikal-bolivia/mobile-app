@@ -5,4 +5,8 @@ abstract class MapRepository {
 
   /// Libera los recursos (cierra el servidor local, la conexión a SQLite).
   Future<void> dispose();
+
+  /// Indica si el servidor local de tiles sigue respondiendo. Devuelve `true`
+  /// cuando no aplica (Android / sin servidor). Se usa al volver de background.
+  Future<bool> isLocalServerHealthy();
 }

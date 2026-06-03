@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/widget_previews.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../core/preview_mocks.dart';
 import '../../data/repositories/search_repository_impl.dart';
 import '../../domain/repositories/location_repository.dart';
+import '../../domain/repositories/search_repository.dart';
 import '../bloc/location_bloc.dart';
 import '../bloc/location_event.dart';
 import '../bloc/location_state.dart';
@@ -14,9 +17,17 @@ import '../widgets/map_buttons.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import '../bloc/routing_bloc.dart';
 import '../bloc/routing_event.dart';
+import 'map_layout.dart';
 
 class MainPage extends StatelessWidget {
-  const MainPage({super.key});
+  const MainPage({
+    super.key,
+    this.searchRepository,
+    this.locationRepository,
+  });
+
+  final SearchRepository? searchRepository;
+  final LocationRepository? locationRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -24,12 +35,12 @@ class MainPage extends StatelessWidget {
       providers: [
         BlocProvider(
           create: (context) => SearchBloc(
-            repository: SearchRepositoryImpl(),
+            repository: searchRepository ?? SearchRepositoryImpl(),
           ),
         ),
         BlocProvider(
           create: (context) => LocationBloc(
-            repository: LocationRepositoryImpl(),
+            repository: locationRepository ?? LocationRepositoryImpl(),
           )..add(LocationStarted()),
         ),
       ],
@@ -146,4 +157,19 @@ class _MainPageContent extends StatelessWidget {
       ],
     );
   }
+}
+
+@Preview(name: 'Main Page Preview')
+Widget previewMainPage() {
+  return BlocProvider<RoutingBloc>(
+    create: (_) => RoutingBloc(),
+    child: MapLayout(
+      mapRepository: MockMapRepository(),
+      mapBuilder: (context, styleString) => MockMapView(styleString: styleString),
+      child: MainPage(
+        searchRepository: MockSearchRepository(),
+        locationRepository: MockLocationRepository(),
+      ),
+    ),
+  );
 }

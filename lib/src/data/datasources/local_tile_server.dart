@@ -51,9 +51,13 @@ class LocalTileServer {
     return (Handler inner) {
       return (Request request) async {
         final response = await inner(request);
-        debugPrint(
-          '[TileServer] ${request.method} /${request.url} -> ${response.statusCode}',
-        );
+        // Una petición por tile: solo logueamos en debug para no pagar la
+        // interpolación de strings en cada tile en release.
+        if (kDebugMode) {
+          debugPrint(
+            '[TileServer] ${request.method} /${request.url} -> ${response.statusCode}',
+          );
+        }
         return response;
       };
     };
@@ -103,13 +107,19 @@ class LocalTileServer {
     }
 
     final data = result.first['tile_data'] as Uint8List;
+
+    // Detectamos la compresión por los magic bytes en vez de asumir gzip:
+    // los MBTiles de vector suelen venir gzippeados, pero no siempre.
+    final isGzip = data.length >= 2 && data[0] == 0x1f && data[1] == 0x8b;
+
     return Response.ok(
       data,
       headers: {
         'Content-Type': 'application/x-protobuf',
-        'Content-Encoding': 'gzip',
+        if (isGzip) 'Content-Encoding': 'gzip',
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'no-cache',
+        // Los tiles son inmutables -> que MapLibre los cachee agresivamente.
+        'Cache-Control': 'public, max-age=31536000, immutable',
       },
     );
   }

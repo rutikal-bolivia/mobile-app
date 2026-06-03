@@ -1,16 +1,20 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/widget_previews.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import '../../domain/repositories/search_repository.dart';
 
 import '../../../core/constants.dart';
+import '../../../core/preview_mocks.dart';
 import '../bloc/map_bloc.dart';
 import '../bloc/map_event.dart';
 import '../bloc/map_state.dart';
 import '../bloc/routing_bloc.dart';
 import '../bloc/routing_state.dart';
+import '../bloc/location_bloc.dart';
+import '../bloc/location_event.dart';
 
 class OfflineMapView extends StatefulWidget {
   const OfflineMapView({super.key, required this.styleString});
@@ -21,16 +25,94 @@ class OfflineMapView extends StatefulWidget {
   State<OfflineMapView> createState() => _OfflineMapViewState();
 }
 
-class _OfflineMapViewState extends State<OfflineMapView> {
+class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObserver {
+  static const String _routeSourceId = 'route-source';
+  static const String _routeLayerId = 'route-layer';
+
   MapLibreMapController? _controller;
-  Circle? _currentCircle; 
+  Circle? _currentCircle;
   Circle? _markerDot;
   Circle? _searchCircle;
   Symbol? _searchText;
-  Line? _routeLine;
+
+  // La ruta vive como GeoJSON source + line layer: actualizarla es un
+  // setGeoJsonSource (barato) en vez de remove/add de una annotation.
+  bool _routeLayerReady = false;
+  List<List<double>>? _pendingRoute;
 
   // Seguimiento local para evitar el snap-back y redundancia
   LatLng? _lastMarkerPosition;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Al volver a primer plano, el MapBloc revisa el servidor local (iOS puede
+    // haberlo cerrado en background) y lo reconstruye si murió.
+    if (state == AppLifecycleState.resumed) {
+      context.read<MapBloc>().add(const MapAppResumed());
+    }
+  }
+
+  // Las sources/layers se añaden cuando el estilo terminó de cargar (no en
+  // onMapCreated, que puede dispararse antes).
+  Future<void> _onStyleLoaded() async {
+    final controller = _controller;
+    if (controller == null) return;
+    try {
+      await controller.addSource(
+        _routeSourceId,
+        GeojsonSourceProperties(data: _routeGeoJson(const [])),
+      );
+      await controller.addLineLayer(
+        _routeSourceId,
+        _routeLayerId,
+        const LineLayerProperties(
+          lineColor: '#00AAFF',
+          lineWidth: 5.0,
+          lineOpacity: 0.8,
+          lineJoin: 'round',
+          lineCap: 'round',
+        ),
+      );
+      _routeLayerReady = true;
+      // Si llegó una ruta antes de tener la capa lista, la aplicamos ahora.
+      if (_pendingRoute != null) {
+        await _drawRoute(_pendingRoute!);
+        _pendingRoute = null;
+      }
+    } catch (e) {
+      debugPrint('[MAP] Error preparando la capa de ruta: $e');
+    }
+  }
+
+  Map<String, dynamic> _routeGeoJson(List<List<double>> coords) {
+    return {
+      'type': 'FeatureCollection',
+      'features': [
+        if (coords.isNotEmpty)
+          {
+            'type': 'Feature',
+            'geometry': {
+              'type': 'LineString',
+              // GeoJSON usa [lon, lat]; el routing entrega [lat, lon].
+              'coordinates': [for (final c in coords) [c[1], c[0]]],
+            },
+            'properties': <String, dynamic>{},
+          },
+      ],
+    };
+  }
 
   void _onMapCreated(MapLibreMapController controller) {
     _controller = controller;
@@ -57,27 +139,18 @@ class _OfflineMapViewState extends State<OfflineMapView> {
   }
 
   Future<void> _drawRoute(List<List<double>> coordinates) async {
-    if (_controller == null) return;
+    final controller = _controller;
+    if (controller == null) return;
 
-    if (_routeLine != null) {
-      await _controller!.removeLine(_routeLine!);
-      _routeLine = null;
+    // Si el estilo aún no terminó de cargar, guardamos la ruta y se aplicará
+    // en cuanto la capa esté lista (_onStyleLoaded).
+    if (!_routeLayerReady) {
+      _pendingRoute = coordinates;
+      return;
     }
 
-    if (coordinates.isNotEmpty) {
-      debugPrint('[MAP] Drawing polyline with ${coordinates.length} points');
-      List<LatLng> points = coordinates.map((c) => LatLng(c[0], c[1])).toList();
-      
-      _routeLine = await _controller!.addLine(
-        LineOptions(
-          geometry: points,
-          lineColor: '#00AAFF',
-          lineWidth: 5.0,
-          lineOpacity: 0.8,
-          lineJoin: 'round',
-        ),
-      );
-    }
+    debugPrint('[MAP] Actualizando capa de ruta con ${coordinates.length} puntos');
+    await controller.setGeoJsonSource(_routeSourceId, _routeGeoJson(coordinates));
   }
 
   void _onMapClick(Point<double> point, LatLng latLng) {
@@ -196,6 +269,9 @@ class _OfflineMapViewState extends State<OfflineMapView> {
             if (state is RoutingSuccess) {
               _drawRoute(state.coordinates);
             } else if (state is RoutingError) {
+              // Limpiamos la ruta anterior para no dejar una línea "fantasma"
+              // que parezca un resultado válido cuando en realidad falló.
+              _drawRoute(const []);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text(state.message), backgroundColor: Colors.red),
               );
@@ -251,7 +327,9 @@ class _OfflineMapViewState extends State<OfflineMapView> {
           zoom: MapConfig.initialZoom,
         ),
         styleString: widget.styleString,
+        minMaxZoomPreference: const MinMaxZoomPreference(null, MapConfig.maxZoom),
         onMapCreated: _onMapCreated,
+        onStyleLoadedCallback: _onStyleLoaded,
         onMapClick: _onMapClick,
         onCameraMove: _onCameraMove,
         myLocationEnabled: true,
@@ -259,4 +337,24 @@ class _OfflineMapViewState extends State<OfflineMapView> {
       ),
     );
   }
+}
+
+@Preview(name: 'Offline Map View (Mocked)')
+Widget previewOfflineMapView() {
+  return MultiBlocProvider(
+    providers: [
+      BlocProvider<LocationBloc>(
+        create: (_) => LocationBloc(repository: MockLocationRepository())..add(LocationStarted()),
+      ),
+      BlocProvider<MapBloc>(
+        create: (_) => MapBloc(repository: MockMapRepository())..add(const MapPrepareRequested()),
+      ),
+      BlocProvider<RoutingBloc>(
+        create: (_) => RoutingBloc(),
+      ),
+    ],
+    child: const Scaffold(
+      body: MockMapView(styleString: 'mock_style'),
+    ),
+  );
 }

@@ -78,3 +78,9 @@ class MapZoomInRequested extends MapEvent {
 class MapZoomOutRequested extends MapEvent {
   const MapZoomOutRequested();
 }
+
+/// La app volvió a primer plano: revisar el servidor local de tiles, que iOS
+/// puede haber cerrado mientras estaba en background, y reconstruirlo si murió.
+class MapAppResumed extends MapEvent {
+  const MapAppResumed();
+}

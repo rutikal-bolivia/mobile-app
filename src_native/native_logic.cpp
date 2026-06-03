@@ -5,12 +5,23 @@
 #include <algorithm>
 #include <fstream>
 #include <stdint.h>
+#include <cstdio>
 
 #if defined(__GNUC__)
     #define FFI_EXPORT __attribute__((visibility("default"))) __attribute__((used))
 #else
     #define FFI_EXPORT
 #endif
+
+// Logging solo en debug: en builds Release (NDEBUG) se compila a nada.
+#ifdef NDEBUG
+    #define LOG(...) ((void)0)
+#else
+    #define LOG(...) printf(__VA_ARGS__)
+#endif
+
+static constexpr float kPi = 3.14159265358979f;
+static constexpr float kEarthRadiusM = 6371000.0f;
 
 struct Point { float lat; float lon; };
 struct Edge { int32_t to; float weight; };
@@ -47,30 +58,143 @@ struct NodeAStar {
     bool operator>(const NodeAStar& other) const { return priority > other.priority; }
 };
 
+// Índice espacial uniforme (grid) para acelerar la búsqueda del nodo más
+// cercano. Pasa de O(n) lineal a ~O(1) amortizado por consulta, que es el
+// cuello de botella real del cálculo de rutas (se consulta 2 veces por ruta).
+struct SpatialGrid {
+    float minLat = 0.0f, minLon = 0.0f;
+    float cellSize = 0.0015f; // ~150 m por celda; suficiente para una ciudad
+    int cols = 0, rows = 0;
+    std::vector<std::vector<int32_t>> cells;
+
+    int clampi(int v, int hi) const { return v < 0 ? 0 : (v >= hi ? hi - 1 : v); }
+    int colOf(float lon) const { return clampi((int)((lon - minLon) / cellSize), cols); }
+    int rowOf(float lat) const { return clampi((int)((lat - minLat) / cellSize), rows); }
+
+    void build(const std::vector<Point>& nodes) {
+        cells.clear();
+        cols = rows = 0;
+        if (nodes.empty()) return;
+
+        float maxLat = nodes[0].lat, maxLon = nodes[0].lon;
+        minLat = nodes[0].lat; minLon = nodes[0].lon;
+        for (const auto& n : nodes) {
+            minLat = std::min(minLat, n.lat); maxLat = std::max(maxLat, n.lat);
+            minLon = std::min(minLon, n.lon); maxLon = std::max(maxLon, n.lon);
+        }
+        cols = std::max(1, (int)((maxLon - minLon) / cellSize) + 1);
+        rows = std::max(1, (int)((maxLat - minLat) / cellSize) + 1);
+        cells.assign((size_t)cols * rows, {});
+        for (int32_t i = 0; i < (int32_t)nodes.size(); ++i) {
+            int cx = colOf(nodes[i].lon);
+            int cy = rowOf(nodes[i].lat);
+            cells[(size_t)cy * cols + cx].push_back(i);
+        }
+    }
+
+    // Índice del nodo más cercano a (lat, lon), o -1 si el grid está vacío.
+    // Busca por anillos crecientes y corta cuando el anillo ya no puede
+    // contener nada más cercano que el mejor candidato encontrado.
+    // Si se pasa `componentOf` y `targetComp >= 0`, solo considera nodos de esa
+    // componente conexa (sirve para ignorar las "islas" desconectadas del grafo).
+    int32_t nearest(const std::vector<Point>& nodes, float lat, float lon,
+                    const std::vector<int32_t>* componentOf = nullptr,
+                    int32_t targetComp = -1) const {
+        if (cols == 0 || rows == 0) return -1;
+        int qcx = colOf(lon);
+        int qcy = rowOf(lat);
+
+        int32_t best = -1;
+        float bestD = INFINITY;
+        int maxRing = cols + rows; // cota: cubre todo el grid
+
+        for (int r = 0; r <= maxRing; ++r) {
+            // El anillo r está a una distancia mínima de (r-1) celdas del punto;
+            // si esa cota ya supera al mejor, ningún nodo igual o más lejano mejora.
+            if (best != -1) {
+                float ringMin = (float)(r - 1) * cellSize;
+                if (ringMin > 0.0f && ringMin * ringMin > bestD) break;
+            }
+            bool anyCellInRange = false;
+            for (int dy = -r; dy <= r; ++dy) {
+                for (int dx = -r; dx <= r; ++dx) {
+                    // Solo el borde del cuadrado de radio r (el anillo).
+                    if (std::max(std::abs(dx), std::abs(dy)) != r) continue;
+                    int cx = qcx + dx, cy = qcy + dy;
+                    if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) continue;
+                    anyCellInRange = true;
+                    for (int32_t idx : cells[(size_t)cy * cols + cx]) {
+                        if (componentOf && targetComp >= 0 &&
+                            (*componentOf)[idx] != targetComp) continue;
+                        float d = distSq(lat, lon, nodes[idx].lat, nodes[idx].lon);
+                        if (d < bestD) { bestD = d; best = idx; }
+                    }
+                }
+            }
+            // Anillo totalmente fuera del grid y ya hay candidato: no hay más.
+            if (!anyCellInRange && best != -1) break;
+        }
+        return best;
+    }
+};
+
 class Graph {
 public:
     std::vector<Point> nodes;
     std::vector<std::vector<Edge>> adj;
+    SpatialGrid grid;
+
+    // Componente conexa de cada nodo + id de la componente más grande.
+    // El grafo del .dat tiene "islas" desconectadas (artefactos de la limpieza
+    // del OSM); snapeando a la componente principal evitamos rutas imposibles.
+    std::vector<int32_t> componentOf;
+    int32_t mainComponent = -1;
 
     struct SnappedPoint {
         Point p;
         int32_t nodeId;
     };
 
-    // Encuentra el punto más cercano en los segmentos que tocan al nodo más cercano
-    SnappedPoint snapToNearestSegment(float lat, float lon) {
-        if (nodes.empty()) return {{0,0}, -1};
-        
-        // 1. Encontrar el nodo más cercano (baseline)
-        int32_t nearestNode = 0;
-        float minDistSq = distSq(lat, lon, nodes[0].lat, nodes[0].lon);
-        for (int32_t i = 1; i < (int32_t)nodes.size(); ++i) {
-            float d = distSq(lat, lon, nodes[i].lat, nodes[i].lon);
-            if (d < minDistSq) {
-                minDistSq = d;
-                nearestNode = i;
+    // Etiqueta cada nodo con su componente conexa (union-find) y guarda la mayor.
+    void computeComponents() {
+        int32_t n = (int32_t)nodes.size();
+        componentOf.assign(n, -1);
+        if (n == 0) { mainComponent = -1; return; }
+
+        std::vector<int32_t> parent(n);
+        for (int32_t i = 0; i < n; ++i) parent[i] = i;
+        auto find = [&](int32_t x) {
+            while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+            return x;
+        };
+        for (int32_t u = 0; u < n; ++u) {
+            for (const auto& e : adj[u]) {
+                int32_t ru = find(u), rv = find(e.to);
+                if (ru != rv) parent[ru] = rv;
             }
         }
+
+        std::vector<int32_t> count(n, 0);
+        int32_t best = -1, bestCount = -1;
+        for (int32_t i = 0; i < n; ++i) {
+            int32_t root = find(i);
+            componentOf[i] = root;
+            if (++count[root] > bestCount) { bestCount = count[root]; best = root; }
+        }
+        mainComponent = best;
+    }
+
+    // Encuentra el punto más cercano en los segmentos que tocan al nodo más cercano.
+    // Con `restrictComponent >= 0` se limita a esa componente conexa.
+    SnappedPoint snapToNearestSegment(float lat, float lon, int32_t restrictComponent = -1) {
+        if (nodes.empty()) return {{0,0}, -1};
+
+        // 1. Encontrar el nodo más cercano usando el índice espacial (O(1) amort.)
+        int32_t nearestNode = grid.nearest(
+            nodes, lat, lon,
+            restrictComponent >= 0 ? &componentOf : nullptr, restrictComponent);
+        if (nearestNode < 0) return {{0,0}, -1};
+        float minDistSq = distSq(lat, lon, nodes[nearestNode].lat, nodes[nearestNode].lon);
 
         Point m = {lat, lon};
         Point bestProj = nodes[nearestNode];
@@ -88,11 +212,19 @@ public:
         return {bestProj, nearestNode};
     }
 
-    // Heurística: Distancia euclidiana simple (ideal para distancias cortas como una ciudad)
+    // Heurística admisible para A*: distancia haversine (línea recta sobre la
+    // esfera, en metros). Como los pesos de las aristas del .dat son la
+    // distancia haversine real, esta heurística nunca sobreestima el costo
+    // del camino -> A* es óptimo y consistente.
     float heuristic(int32_t a, int32_t b) {
-        float dLat = nodes[a].lat - nodes[b].lat;
-        float dLon = nodes[a].lon - nodes[b].lon;
-        return std::sqrt(dLat * dLat + dLon * dLon) * 111000.0f; // Aprox metros
+        float lat1 = nodes[a].lat * kPi / 180.0f;
+        float lat2 = nodes[b].lat * kPi / 180.0f;
+        float dLat = lat2 - lat1;
+        float dLon = (nodes[b].lon - nodes[a].lon) * kPi / 180.0f;
+        float s1 = std::sin(dLat * 0.5f);
+        float s2 = std::sin(dLon * 0.5f);
+        float h = s1 * s1 + std::cos(lat1) * std::cos(lat2) * s2 * s2;
+        return 2.0f * kEarthRadiusM * std::asin(std::sqrt(h));
     }
 
     // IMPORTANTE: Faltaba esta función para leer tu archivo .dat con las coordenadas
@@ -103,6 +235,7 @@ public:
         int32_t nodeCount, edgeCount;
         file.read((char*)&nodeCount, sizeof(int32_t));
         file.read((char*)&edgeCount, sizeof(int32_t));
+        if (!file.good() || nodeCount <= 0 || edgeCount < 0) return false;
 
         nodes.resize(nodeCount);
         for (int i = 0; i < nodeCount; ++i) {
@@ -111,6 +244,7 @@ public:
             file.read((char*)&lon, sizeof(float));
             nodes[i] = {lat, lon};
         }
+        if (!file.good()) { nodes.clear(); return false; }
 
         adj.resize(nodeCount);
         for (int i = 0; i < edgeCount; ++i) {
@@ -119,11 +253,20 @@ public:
             file.read((char*)&u, sizeof(int32_t));
             file.read((char*)&v, sizeof(int32_t));
             file.read((char*)&dist, sizeof(float));
+            if (!file.good()) { nodes.clear(); adj.clear(); return false; }
+
+            // Saltar aristas con índices fuera de rango (archivo corrupto)
+            // en vez de indexar out-of-bounds y crashear.
+            if (u < 0 || v < 0 || u >= nodeCount || v >= nodeCount) continue;
 
             adj[u].push_back({v, dist});
             adj[v].push_back({u, dist});
         }
         file.close();
+
+        // Construir el índice espacial y etiquetar componentes conexas una vez.
+        grid.build(nodes);
+        computeComponents();
         return true;
     }
 
@@ -209,20 +352,22 @@ extern "C" {
     }
 
     FFI_EXPORT const char* calculate_route(float startLat, float startLon, float endLat, float endLon) {
-        printf("[C++] Calculando ruta con snap: (%f, %f) -> (%f, %f)\n", startLat, startLon, endLat, endLon);
-        
+        LOG("[C++] Calculando ruta con snap: (%f, %f) -> (%f, %f)\n", startLat, startLon, endLat, endLon);
+
         if (g_paz.nodes.empty()) {
-            printf("[C++] ERROR: Grafo no cargado.\n");
+            LOG("[C++] ERROR: Grafo no cargado.\n");
             return "Grafo no cargado";
         }
 
-        auto startSnap = g_paz.snapToNearestSegment(startLat, startLon);
-        auto endSnap = g_paz.snapToNearestSegment(endLat, endLon);
-        
-        printf("[C++] Snapping completado.\n");
+        // Snapeamos ambos extremos a la componente principal: así siempre hay
+        // un camino posible (las "islas" desconectadas se ignoran).
+        auto startSnap = g_paz.snapToNearestSegment(startLat, startLon, g_paz.mainComponent);
+        auto endSnap = g_paz.snapToNearestSegment(endLat, endLon, g_paz.mainComponent);
 
-        std::string result = g_paz.findPath(startSnap, endSnap); 
-        printf("[C++] A* con snap completado.\n");
+        LOG("[C++] Snapping completado.\n");
+
+        std::string result = g_paz.findPath(startSnap, endSnap);
+        LOG("[C++] A* con snap completado.\n");
 
         static std::string static_result;
         static_result = result;
@@ -230,8 +375,8 @@ extern "C" {
     }
 
     FFI_EXPORT const char* test_routing() {
-        auto startSnap = g_paz.snapToNearestSegment(-16.4958f, -68.1335f); // San Francisco
-        auto endSnap = g_paz.snapToNearestSegment(-16.5011f, -68.1312f);   // El Prado
+        auto startSnap = g_paz.snapToNearestSegment(-16.4958f, -68.1335f, g_paz.mainComponent); // San Francisco
+        auto endSnap = g_paz.snapToNearestSegment(-16.5011f, -68.1312f, g_paz.mainComponent);   // El Prado
         
         std::string result = g_paz.findPath(startSnap, endSnap); 
         

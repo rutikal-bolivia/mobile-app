@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../data/datasources/app_database_service.dart';
 import '../bloc/navigation_cubit.dart';
 import '../bloc/routing_bloc.dart';
 import '../bloc/routing_event.dart';
+import '../bloc/sync_cubit.dart';
 import 'favorites_page.dart';
 import 'home_page.dart';
 import 'main_page.dart';
@@ -23,6 +25,10 @@ class RootPage extends StatelessWidget {
         ),
         BlocProvider(
           create: (context) => RoutingBloc()..add(InitializeRouting()),
+        ),
+        BlocProvider(
+          create: (context) => SyncCubit(dbService: AppDatabaseService())
+            ..synchronize(),
         ),
       ],
       child: const _RootPageContent(),
