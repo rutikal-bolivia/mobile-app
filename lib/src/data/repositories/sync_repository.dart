@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import '../../../../core/app_config.dart';
+import '../../../../core/sync_event_bus.dart';
 import '../datasources/app_database_service.dart';
 
 class SyncRepository {
@@ -10,7 +11,11 @@ class SyncRepository {
     required this.dbService,
     Dio? dio,
     String? baseUrl,
-  })  : _dio = dio ?? Dio(),
+  })  : _dio = dio ??
+            Dio(BaseOptions(
+              connectTimeout: const Duration(seconds: 10),
+              receiveTimeout: const Duration(seconds: 30),
+            )),
         baseUrl = baseUrl ?? AppConfig.backendUrl;
 
   final AppDatabaseService dbService;
@@ -107,6 +112,7 @@ class SyncRepository {
       }
 
       debugPrint('[SYNC] Sincronización completada con éxito. Nuevo cursor: $cursor');
+      syncEventBus.notifyCompleted();
       return true;
     } catch (e) {
       debugPrint('[SYNC] Error durante la sincronización: $e');
@@ -221,6 +227,8 @@ class SyncRepository {
         return 'paradas';
       case 'rutas_paradas':
         return 'rutas_paradas';
+      case 'transbordos':
+        return 'transbordos';
       case 'horarios':
         return 'horarios';
       case 'trayectoria_intervalo':

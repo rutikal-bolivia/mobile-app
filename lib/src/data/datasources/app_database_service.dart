@@ -3,6 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+// Incrementa este número cada vez que reemplaces el asset rutikal_db.sqlite.
+// Al arrancar, si el valor guardado en la DB no coincide, se re-copia el asset.
+const _kAssetVersion = 3;
+
 class AppDatabaseService {
   AppDatabaseService({this.dbName = 'rutikal_db.sqlite'});
 
@@ -23,6 +27,22 @@ class AppDatabaseService {
     }
   }
 
+  /// Devuelve true si la DB no existe, está vacía, o la versión del asset
+  /// cambió (detectado via archivo .version, sin abrir ninguna conexión sqflite).
+  Future<bool> _needsAssetCopy(String path) async {
+    final file = File(path);
+    if (!await file.exists() || await file.length() == 0) return true;
+
+    try {
+      final versionFile = File('$path.version');
+      if (!await versionFile.exists()) return true;
+      final stored = int.tryParse((await versionFile.readAsString()).trim()) ?? 0;
+      return stored != _kAssetVersion;
+    } catch (_) {
+      return true;
+    }
+  }
+
   Future<Database> _initDatabase() async {
     String path;
     if (dbName == inMemoryDatabasePath) {
@@ -31,38 +51,33 @@ class AppDatabaseService {
       final dbPath = await getDatabasesPath();
       path = join(dbPath, dbName);
 
-      // Si la base de datos no existe localmente, la copiamos de los assets
-      bool exists = await databaseExists(path);
-      if (exists) {
-        try {
-          final file = File(path);
-          if (await file.exists() && await file.length() == 0) {
-            exists = false;
-            await file.delete();
-          }
-        } catch (_) {
-          exists = false;
-        }
-      }
-
-      if (!exists) {
+      // Copiamos el asset si la DB no existe o si la versión del asset cambió.
+      final needsCopy = await _needsAssetCopy(path);
+      if (needsCopy) {
         try {
           await Directory(dirname(path)).create(recursive: true);
           final ByteData data = await rootBundle.load(join('assets', dbName));
-          final List<int> bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+          final List<int> bytes =
+              data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
           await File(path).writeAsBytes(bytes, flush: true);
         } catch (e) {
-          // Si falla (ej. estamos en tests de host o el asset no está empaquetado),
-          // permitimos que continúe para que openDatabase llame a _onCreate
+          // Si falla (ej. tests de host o asset no empaquetado),
+          // continuamos para que openDatabase llame a _onCreate.
         }
       }
     }
 
+    final dbPath = path; // capturado en el closure de onOpen
     return await openDatabase(
       path,
       version: 1,
       onCreate: _onCreate,
       onOpen: (db) async {
+        // Escribe el marcador de versión del asset como archivo plano junto a la DB.
+        // Evita usar sqflite para la comprobación y así prevenir race conditions
+        // entre múltiples instancias de AppDatabaseService.
+        await File('$dbPath.version')
+            .writeAsString(_kAssetVersion.toString(), flush: true);
         await db.execute('''
           CREATE TABLE IF NOT EXISTS favoritos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,6 +111,27 @@ class AppDatabaseService {
             rutas_json TEXT,
             updated_at TEXT,
             cached_at TEXT
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS transbordos (
+            id INTEGER PRIMARY KEY,
+            ruta_origen_id INTEGER,
+            ruta_destino_id INTEGER,
+            parada_origen_id INTEGER,
+            parada_destino_id INTEGER,
+            tipo TEXT,
+            distancia_metros REAL,
+            tiempo_estimado_segundos INTEGER,
+            activo INTEGER,
+            origen_datos TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            deleted_at TEXT,
+            FOREIGN KEY (ruta_origen_id) REFERENCES rutas (id),
+            FOREIGN KEY (ruta_destino_id) REFERENCES rutas (id),
+            FOREIGN KEY (parada_origen_id) REFERENCES paradas (id),
+            FOREIGN KEY (parada_destino_id) REFERENCES paradas (id)
           )
         ''');
       },
@@ -232,17 +268,26 @@ class AppDatabaseService {
       )
     ''');
 
-    // 11. Conexiones (Transbordos)
+    // 11. Transbordos
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS conexiones (
-        id_ruta_origen INTEGER,
-        id_ruta_destino INTEGER,
-        id_parada_transferencia INTEGER,
-        costo_transbordo REAL,
-        PRIMARY KEY (id_ruta_origen, id_ruta_destino, id_parada_transferencia),
-        FOREIGN KEY (id_ruta_origen) REFERENCES rutas (id),
-        FOREIGN KEY (id_ruta_destino) REFERENCES rutas (id),
-        FOREIGN KEY (id_parada_transferencia) REFERENCES paradas (id)
+      CREATE TABLE IF NOT EXISTS transbordos (
+        id INTEGER PRIMARY KEY,
+        ruta_origen_id INTEGER,
+        ruta_destino_id INTEGER,
+        parada_origen_id INTEGER,
+        parada_destino_id INTEGER,
+        tipo TEXT,
+        distancia_metros REAL,
+        tiempo_estimado_segundos INTEGER,
+        activo INTEGER,
+        origen_datos TEXT,
+        created_at TEXT,
+        updated_at TEXT,
+        deleted_at TEXT,
+        FOREIGN KEY (ruta_origen_id) REFERENCES rutas (id),
+        FOREIGN KEY (ruta_destino_id) REFERENCES rutas (id),
+        FOREIGN KEY (parada_origen_id) REFERENCES paradas (id),
+        FOREIGN KEY (parada_destino_id) REFERENCES paradas (id)
       )
     ''');
 

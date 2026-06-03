@@ -97,15 +97,24 @@ CREATE TABLE trayectoria_intervalo (
   FOREIGN KEY (ruta_parada_final_id) REFERENCES rutas_paradas (id)
 );
 
-CREATE TABLE conexiones (
-  id_ruta_origen INTEGER,
-  id_ruta_destino INTEGER,
-  id_parada_transferencia INTEGER,
-  costo_transbordo REAL,
-  PRIMARY KEY (id_ruta_origen, id_ruta_destino, id_parada_transferencia),
-  FOREIGN KEY (id_ruta_origen) REFERENCES rutas (id),
-  FOREIGN KEY (id_ruta_destino) REFERENCES rutas (id),
-  FOREIGN KEY (id_parada_transferencia) REFERENCES paradas (id)
+CREATE TABLE transbordos (
+  id INTEGER PRIMARY KEY,
+  ruta_origen_id INTEGER,
+  ruta_destino_id INTEGER,
+  parada_origen_id INTEGER,
+  parada_destino_id INTEGER,
+  tipo TEXT,
+  distancia_metros REAL,
+  tiempo_estimado_segundos INTEGER,
+  activo INTEGER,
+  origen_datos TEXT,
+  created_at TEXT,
+  updated_at TEXT,
+  deleted_at TEXT,
+  FOREIGN KEY (ruta_origen_id) REFERENCES rutas (id),
+  FOREIGN KEY (ruta_destino_id) REFERENCES rutas (id),
+  FOREIGN KEY (parada_origen_id) REFERENCES paradas (id),
+  FOREIGN KEY (parada_destino_id) REFERENCES paradas (id)
 );
 
 CREATE TABLE noticias (

@@ -8,7 +8,11 @@ import '../../domain/models/noticia.dart';
 
 class ContentRepository {
   ContentRepository({required this.dbService, Dio? dio})
-      : _dio = dio ?? Dio();
+      : _dio = dio ??
+            Dio(BaseOptions(
+              connectTimeout: const Duration(seconds: 10),
+              receiveTimeout: const Duration(seconds: 15),
+            ));
 
   final AppDatabaseService dbService;
   final Dio _dio;

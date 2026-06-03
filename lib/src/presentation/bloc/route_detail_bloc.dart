@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/sync_event_bus.dart';
 import '../../domain/repositories/routes_repository.dart';
 import '../../domain/repositories/favorites_repository.dart';
 import 'route_detail_event.dart';
@@ -8,6 +10,9 @@ class RouteDetailBloc extends Bloc<RouteDetailEvent, RouteDetailState> {
   final RoutesRepository repository;
   final FavoritesRepository favoritesRepository;
 
+  int? _currentRouteId;
+  StreamSubscription<void>? _syncSub;
+
   RouteDetailBloc({
     required this.repository,
     required this.favoritesRepository,
@@ -16,12 +21,30 @@ class RouteDetailBloc extends Bloc<RouteDetailEvent, RouteDetailState> {
     on<RouteDetailSentidoChanged>(_onSentidoChanged);
     on<RouteDetailStopSelected>(_onStopSelected);
     on<RouteDetailFavoriteToggled>(_onFavoriteToggled);
+
+    // Re-carga automática cuando el sync deposita datos nuevos en la DB.
+    _syncSub = syncEventBus.onSyncCompleted.listen((_) {
+      final s = state;
+      if (_currentRouteId != null && s is RouteDetailLoaded) {
+        add(RouteDetailSentidoChanged(
+          routeId: _currentRouteId!,
+          sentido: s.sentido,
+        ));
+      }
+    });
+  }
+
+  @override
+  Future<void> close() {
+    _syncSub?.cancel();
+    return super.close();
   }
 
   Future<void> _onLoadRequested(
     RouteDetailLoadRequested event,
     Emitter<RouteDetailState> emit,
   ) async {
+    _currentRouteId = event.routeId;
     emit(const RouteDetailLoading());
     try {
       final stops = await repository.getRouteStops(event.routeId, event.sentido);

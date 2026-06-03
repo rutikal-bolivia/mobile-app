@@ -23,21 +23,21 @@ Encontrar la mejor combinación de rutas (incluyendo transbordos) para ir de un 
 1.  **Identificación de Puntos Cercanos:** Buscar las paradas más cercanas al inicio (A) y al destino (B).
 2.  **Misma Ruta:** Si A' y B' pertenecen a la misma ruta y están en el orden correcto, se muestra como ruta directa.
 3.  **Transbordos (Transfers):**
-    *   Si no hay ruta directa, buscar conexiones entre rutas.
+    *   Si no hay ruta directa, buscar transbordos entre rutas.
     *   **Entre Buses:** Una parada puede pertenecer a múltiples rutas. Si la Parada X está en Ruta 1 y Ruta 3, es un punto de transbordo natural.
     *   **Entre Bus y Teleférico:** Requiere calcular la distancia entre paradas de bus y estaciones de teleférico. Si están dentro de un radio aceptable (ej. 100-200 metros), se consideran "conectadas".
 
-## Tabla de Transbordos (Conexiones)
+## Tabla de Transbordos
 
 ### Propuesta de Pre-cálculo
 Para optimizar las búsquedas en tiempo real, se decidió pre-calcular las conexiones:
-*   **Tabla `Conexiones`:** `id_ruta_origen, id_ruta_destino, id_parada_transferencia, costo_transbordo`.
+*   **Tabla `transbordos`:** `ruta_origen_id, ruta_destino_id, parada_origen_id, parada_destino_id, tipo, distancia_metros, tiempo_estimado_segundos`.
 *   Esto evita realizar joins complejos o cálculos de distancia geodésica cada vez que un usuario busca una ruta.
 
 ### Cálculo de Transbordos
 1.  **Intersección Directa:** `SELECT id_ruta FROM paradas_rutas WHERE id_parada = ?`. Si una parada tiene >1 ruta, esas rutas están conectadas.
 2.  **Proximidad Geográfica:** Para sistemas no integrados físicamente (ej. parada de bus cerca de estación de teleférico), se ejecuta un script que busca paradas en un radio R.
-3.  **Peso/Costo:** El costo de un transbordo debe incluir el tiempo de caminata estimado y un "penalizador" por el hecho de tener que cambiar de vehículo, para priorizar rutas directas.
+3.  **Peso:** `tiempo_estimado_segundos` incluye el tiempo de caminata estimado y un penalizador por cambiar de vehículo, para priorizar rutas directas.
 
 ## Mejoras de Visualización
 *   **Proyección Ortogonal:** Para evitar que la línea de la ruta se vea incompleta, se implementó una lógica que proyecta el punto final (marcador rojo) ortogonalmente hacia la calle/tramo más cercano, uniendo el último punto del grafo con esta proyección.

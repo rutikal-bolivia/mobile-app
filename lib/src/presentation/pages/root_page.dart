@@ -27,6 +27,7 @@ class RootPage extends StatelessWidget {
           create: (context) => RoutingBloc()..add(InitializeRouting()),
         ),
         BlocProvider(
+          lazy: false,
           create: (context) => SyncCubit(dbService: AppDatabaseService())
             ..synchronize(),
         ),

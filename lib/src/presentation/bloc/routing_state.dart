@@ -1,3 +1,5 @@
+import '../../domain/models/multimodal_route.dart';
+
 // Estados
 abstract class RoutingState {}
 
@@ -12,5 +14,7 @@ class RoutingError extends RoutingState {
 
 class RoutingSuccess extends RoutingState {
   final List<List<double>> coordinates;
-  RoutingSuccess(this.coordinates);
+  final ResultadoRutaMultimodal? resultadoMultimodal;
+
+  RoutingSuccess(this.coordinates, {this.resultadoMultimodal});
 }
