@@ -47,11 +47,12 @@ class FakeMultimodalRoutingEngine extends MultimodalRoutingEngine {
   final ResultadoRutaMultimodal? resultado;
 
   @override
-  Future<ResultadoRutaMultimodal?> calcularRuta({
+  Future<List<ResultadoRutaMultimodal>> calcularOpciones({
     required GrafoTransporte grafo,
     required SolicitudRutaMultimodal solicitud,
   }) async {
-    return resultado;
+    final valor = resultado;
+    return valor == null ? const [] : [valor];
   }
 }
 
@@ -86,6 +87,12 @@ void main() {
         ),
       );
 
+      final options = await _esperarEstado<RoutingOptionsFound>(bloc);
+
+      expect(options.opciones, [resultado]);
+      expect(fallbackLlamado, isFalse);
+
+      bloc.add(SelectRouteOptionRequested(options.opciones.first));
       final success = await _esperarEstado<RoutingSuccess>(bloc);
 
       expect(success.resultadoMultimodal, resultado);
@@ -184,6 +191,9 @@ GrafoTransporte _grafoConViaje() {
     paradaId: 1,
     sentido: 1,
     orden: 1,
+    nombreParada: 'Parada A',
+    latitud: -16.5,
+    longitud: -68.1,
   );
   final b = ParadaEnRuta(
     id: 2,
@@ -192,6 +202,9 @@ GrafoTransporte _grafoConViaje() {
     paradaId: 2,
     sentido: 1,
     orden: 2,
+    nombreParada: 'Parada B',
+    latitud: -16.51,
+    longitud: -68.11,
   );
   return GrafoTransporte(
     nodos: [acceso, egreso, a, b],

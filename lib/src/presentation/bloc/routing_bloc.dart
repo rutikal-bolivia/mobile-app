@@ -105,22 +105,17 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
         final endLat = event.destination.latitude;
         final endLon = event.destination.longitude;
 
-        final resultadoMultimodal = await _intentarRutaMultimodal(event);
-        if (resultadoMultimodal != null &&
-            resultadoMultimodal.coordenadas.isNotEmpty) {
-          final tipos = resultadoMultimodal.segmentos.map((s) => s.tipo.name).join('→');
-          final muestra = resultadoMultimodal.coordenadas.take(3).toList();
+        final opcionesMultimodales = await _intentarRutasMultimodales(event);
+        if (opcionesMultimodales.isNotEmpty) {
+          final mejor = opcionesMultimodales.first;
+          final tipos = mejor.segmentos.map((s) => s.tipo.name).join('→');
+          final muestra = mejor.coordenadas.take(3).toList();
           debugPrint(
-            "=== [ROUTING] Ruta multimodal: ${resultadoMultimodal.segmentos.length} segmentos "
-            "| $tipos | ${resultadoMultimodal.coordenadas.length} pts ===",
+            "=== [ROUTING] Opciones multimodales: ${opcionesMultimodales.length} "
+            "| mejor=${mejor.segmentos.length} segmentos | $tipos | ${mejor.coordenadas.length} pts ===",
           );
           debugPrint("=== [ROUTING] Primeras coords [lat,lon]: $muestra ===");
-          emit(
-            RoutingSuccess(
-              resultadoMultimodal.coordenadas,
-              resultadoMultimodal: resultadoMultimodal,
-            ),
-          );
+          emit(RoutingOptionsFound(opcionesMultimodales));
           return;
         }
 
@@ -151,6 +146,15 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
         debugPrint("=== [ROUTING] Excepción: $e ===");
         emit(RoutingError('Error al calcular ruta: $e'));
       }
+    });
+
+    on<SelectRouteOptionRequested>((event, emit) {
+      emit(
+        RoutingSuccess(
+          event.resultado.coordenadas,
+          resultadoMultimodal: event.resultado,
+        ),
+      );
     });
   }
 
@@ -191,13 +195,13 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
     }
   }
 
-  Future<ResultadoRutaMultimodal?> _intentarRutaMultimodal(
+  Future<List<ResultadoRutaMultimodal>> _intentarRutasMultimodales(
     CalculateRouteRequested event,
   ) async {
     final grafo = _grafoTransporte;
     if (grafo == null) {
       debugPrint('=== [ROUTING] ❌ Grafo multimodal es null ===');
-      return null;
+      return const [];
     }
     if (grafo.estadisticas.aristasViaje == 0) {
       debugPrint(
@@ -206,7 +210,7 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
         'nodos=${grafo.estadisticas.nodos} '
         'aristas=${grafo.estadisticas.aristas} ===',
       );
-      return null;
+      return const [];
     }
 
     debugPrint(
@@ -217,10 +221,10 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
     );
 
     // Diagnóstico de candidatas antes de entrar al motor.
-    final candidatasAcceso =
-        multimodalRoutingEngine.seleccionarCandidatasAcceso(grafo, event.origin);
-    final candidatasEgreso =
-        multimodalRoutingEngine.seleccionarCandidatasEgreso(grafo, event.destination);
+    final candidatasAcceso = multimodalRoutingEngine
+        .seleccionarCandidatasAcceso(grafo, event.origin);
+    final candidatasEgreso = multimodalRoutingEngine
+        .seleccionarCandidatasEgreso(grafo, event.destination);
 
     debugPrint(
       '=== [ROUTING] Candidatas — '
@@ -231,31 +235,31 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
 
     if (candidatasAcceso.isEmpty) {
       debugPrint('=== [ROUTING] ❌ Sin paradas dentro del radio de origen ===');
-      return null;
+      return const [];
     }
     if (candidatasEgreso.isEmpty) {
       debugPrint('=== [ROUTING] ❌ Sin paradas dentro del radio de destino ===');
-      return null;
+      return const [];
     }
 
     try {
-      final resultado = await multimodalRoutingEngine.calcularRuta(
+      final opciones = await multimodalRoutingEngine.calcularOpciones(
         grafo: grafo,
         solicitud: SolicitudRutaMultimodal(
           origen: event.origin,
           destino: event.destination,
         ),
       );
-      if (resultado == null) {
+      if (opciones.isEmpty) {
         debugPrint(
           '=== [ROUTING] ❌ Motor devolvió null — '
           'sin aristas de caminata válidas o sin camino en grafo ===',
         );
       }
-      return resultado;
+      return opciones;
     } catch (e) {
       debugPrint('=== [ROUTING] ❌ Excepción en motor multimodal: $e ===');
-      return null;
+      return const [];
     }
   }
 }

@@ -94,6 +94,9 @@ ParadaEnRuta _enRuta(int id) {
     paradaId: id,
     sentido: 1,
     orden: id,
+    nombreParada: 'Parada $id',
+    latitud: -16.5,
+    longitud: -68.1,
   );
 }
 

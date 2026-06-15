@@ -5,11 +5,19 @@ class GraphBuildConfig extends Equatable {
   final int penalizacionAbordajeSegundos;
   final int frecuenciaPorDefectoMinutos;
   final bool permitirTransbordosImplicitos;
+  final bool crearViajesRectosSiFaltaTrayectoria;
+  final double velocidadBusFallbackMetrosPorSegundo;
+  final double velocidadTelefericoFallbackMetrosPorSegundo;
+  final double velocidadFallbackMetrosPorSegundo;
 
   const GraphBuildConfig({
     this.penalizacionAbordajeSegundos = 0,
     this.frecuenciaPorDefectoMinutos = 15,
     this.permitirTransbordosImplicitos = false,
+    this.crearViajesRectosSiFaltaTrayectoria = true,
+    this.velocidadBusFallbackMetrosPorSegundo = 5.0,
+    this.velocidadTelefericoFallbackMetrosPorSegundo = 7.0,
+    this.velocidadFallbackMetrosPorSegundo = 5.0,
   });
 
   @override
@@ -17,6 +25,10 @@ class GraphBuildConfig extends Equatable {
     penalizacionAbordajeSegundos,
     frecuenciaPorDefectoMinutos,
     permitirTransbordosImplicitos,
+    crearViajesRectosSiFaltaTrayectoria,
+    velocidadBusFallbackMetrosPorSegundo,
+    velocidadTelefericoFallbackMetrosPorSegundo,
+    velocidadFallbackMetrosPorSegundo,
   ];
 }
 

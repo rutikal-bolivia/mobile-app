@@ -220,6 +220,9 @@ ParadaEnRuta _enRuta(
     paradaId: paradaId,
     sentido: 1,
     orden: orden,
+    nombreParada: 'Parada $paradaId',
+    latitud: -16.5 - paradaId * 0.001,
+    longitud: -68.1 - paradaId * 0.001,
   );
 }
 

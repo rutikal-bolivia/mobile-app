@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/models/graph_build_config.dart';
 import '../../domain/models/transport_graph.dart';
 import '../datasources/transport_graph_data_source.dart';
+import 'route_geometry_utils.dart';
 
 class GraphBuilder {
   final GraphBuildConfig config;
@@ -66,6 +67,7 @@ class GraphBuilder {
 
     for (final rutaParada in rutasParadasValidas) {
       final ruta = rutasActivas[rutaParada.rutaId]!;
+      final parada = paradasActivas[rutaParada.paradaId]!;
       final nodo = ParadaEnRuta(
         id: rutaParada.id,
         transporteId: ruta.transporteId,
@@ -73,6 +75,9 @@ class GraphBuilder {
         paradaId: rutaParada.paradaId,
         sentido: rutaParada.sentido,
         orden: rutaParada.orden,
+        nombreParada: parada.nombre,
+        latitud: parada.latitud,
+        longitud: parada.longitud,
       );
       enRutaPorId[rutaParada.id] = nodo;
       nodos.add(nodo);
@@ -94,12 +99,24 @@ class GraphBuilder {
       aristas: aristas,
     );
 
-    _agregarAristasViaje(
+    final viajesDesdeTrayectoria = _agregarAristasViaje(
       snapshot.trayectoriaIntervalos,
       enRutaPorId,
       aristas,
       diagnosticos,
     );
+
+    if (config.crearViajesRectosSiFaltaTrayectoria) {
+      _agregarAristasViajeRectasFallback(
+        rutasParadasValidas: rutasParadasValidas,
+        rutasActivas: rutasActivas,
+        paradasActivas: paradasActivas,
+        enRutaPorId: enRutaPorId,
+        viajesExistentes: viajesDesdeTrayectoria,
+        aristas: aristas,
+        diagnosticos: diagnosticos,
+      );
+    }
 
     _agregarAristasTransbordo(
       transbordos: snapshot.transbordos,
@@ -115,7 +132,7 @@ class GraphBuilder {
           tipo: TipoDiagnosticoGrafo.informacion,
           codigo: 'trayectoria_intervalo_vacia',
           mensaje:
-              'No hay filas en trayectoria_intervalo; el grafo no contiene aristas de viaje.',
+              'No hay filas en trayectoria_intervalo; se usan tramos rectos entre paradas consecutivas.',
         ),
       );
     }
@@ -170,7 +187,7 @@ class GraphBuilder {
     }
   }
 
-  void _agregarAristasViaje(
+  Set<String> _agregarAristasViaje(
     List<TrayectoriaIntervaloRegistro> intervalos,
     Map<int, ParadaEnRuta> enRutaPorId,
     List<AristaGrafo> aristas,
@@ -179,6 +196,7 @@ class GraphBuilder {
     int sinNodo = 0;
     int sinPeso = 0;
     final idsFaltantes = <int>{};
+    final viajesCreados = <String>{};
 
     for (final intervalo in intervalos) {
       final origen = enRutaPorId[intervalo.rutaParadaInicioId];
@@ -231,6 +249,7 @@ class GraphBuilder {
           distanciaMetros: intervalo.distanciaMetros,
         ),
       );
+      viajesCreados.add(_claveViaje(origen.id, destino.id));
     }
 
     final ok = intervalos.length - sinNodo - sinPeso;
@@ -241,11 +260,113 @@ class GraphBuilder {
     );
     if (idsFaltantes.isNotEmpty) {
       final muestra = (idsFaltantes.toList()..sort()).take(10).toList();
-      final minKey = enRutaPorId.keys.reduce((a, b) => a < b ? a : b);
-      final maxKey = enRutaPorId.keys.reduce((a, b) => a > b ? a : b);
       debugPrint('[GRAPH] IDs NO encontrados (muestra): $muestra');
-      debugPrint('[GRAPH] Rango de enRutaPorId: $minKey–$maxKey');
+      if (enRutaPorId.isNotEmpty) {
+        final minKey = enRutaPorId.keys.reduce((a, b) => a < b ? a : b);
+        final maxKey = enRutaPorId.keys.reduce((a, b) => a > b ? a : b);
+        debugPrint('[GRAPH] Rango de enRutaPorId: $minKey–$maxKey');
+      }
     }
+    return viajesCreados;
+  }
+
+  void _agregarAristasViajeRectasFallback({
+    required List<RutaParadaRegistro> rutasParadasValidas,
+    required Map<int, RutaRegistro> rutasActivas,
+    required Map<int, ParadaRegistro> paradasActivas,
+    required Map<int, ParadaEnRuta> enRutaPorId,
+    required Set<String> viajesExistentes,
+    required List<AristaGrafo> aristas,
+    required List<DiagnosticoGrafo> diagnosticos,
+  }) {
+    final porRutaYSentido = <String, List<RutaParadaRegistro>>{};
+    for (final rutaParada in rutasParadasValidas) {
+      final clave = '${rutaParada.rutaId}:${rutaParada.sentido}';
+      porRutaYSentido
+          .putIfAbsent(clave, () => <RutaParadaRegistro>[])
+          .add(rutaParada);
+    }
+
+    var creadas = 0;
+    var omitidasSinCoordenadas = 0;
+
+    for (final entry in porRutaYSentido.entries) {
+      final paradasOrdenadas = entry.value
+        ..sort((a, b) => a.orden.compareTo(b.orden));
+      for (var i = 0; i < paradasOrdenadas.length - 1; i++) {
+        final inicio = paradasOrdenadas[i];
+        final fin = paradasOrdenadas[i + 1];
+        final origen = enRutaPorId[inicio.id]!;
+        final destino = enRutaPorId[fin.id]!;
+        final claveViaje = _claveViaje(origen.id, destino.id);
+        if (viajesExistentes.contains(claveViaje)) continue;
+
+        final paradaOrigen = paradasActivas[inicio.paradaId]!;
+        final paradaDestino = paradasActivas[fin.paradaId]!;
+        final latOrigen = paradaOrigen.latitud;
+        final lonOrigen = paradaOrigen.longitud;
+        final latDestino = paradaDestino.latitud;
+        final lonDestino = paradaDestino.longitud;
+        if (latOrigen == null ||
+            lonOrigen == null ||
+            latDestino == null ||
+            lonDestino == null) {
+          omitidasSinCoordenadas++;
+          continue;
+        }
+
+        final distancia = distanciaHaversineMetros(
+          latOrigen,
+          lonOrigen,
+          latDestino,
+          lonDestino,
+        );
+        final ruta = rutasActivas[inicio.rutaId]!;
+        final velocidad = _velocidadFallback(ruta.transporteId);
+        final pesoCalculado = (distancia / velocidad).round();
+        final peso = pesoCalculado < 1 ? 1 : pesoCalculado;
+
+        aristas.add(
+          AristaGrafo(
+            origen: origen,
+            destino: destino,
+            pesoSegundos: peso,
+            tipo: TipoAristaGrafo.viaje,
+            transporteId: ruta.transporteId,
+            rutaId: ruta.id,
+            distanciaMetros: distancia,
+            geometriaCoordenadas: [
+              [latOrigen, lonOrigen],
+              [latDestino, lonDestino],
+            ],
+          ),
+        );
+        creadas++;
+      }
+    }
+
+    if (creadas > 0) {
+      diagnosticos.add(
+        DiagnosticoGrafo(
+          tipo: TipoDiagnosticoGrafo.informacion,
+          codigo: 'viajes_rectos_fallback',
+          mensaje:
+              'Se crearon tramos rectos entre paradas consecutivas para completar el grafo.',
+          metadata: {
+            'aristas_creadas': creadas,
+            'omitidas_sin_coordenadas': omitidasSinCoordenadas,
+          },
+        ),
+      );
+    }
+  }
+
+  double _velocidadFallback(int? transporteId) {
+    if (transporteId == 1) return config.velocidadBusFallbackMetrosPorSegundo;
+    if (transporteId == 2) {
+      return config.velocidadTelefericoFallbackMetrosPorSegundo;
+    }
+    return config.velocidadFallbackMetrosPorSegundo;
   }
 
   void _agregarAristasTransbordo({
@@ -381,4 +502,6 @@ class GraphBuilder {
   }
 
   String _claveRutaParada(int rutaId, int paradaId) => '$rutaId:$paradaId';
+
+  String _claveViaje(int origenId, int destinoId) => '$origenId:$destinoId';
 }

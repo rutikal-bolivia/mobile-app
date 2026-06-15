@@ -10,16 +10,19 @@ import 'route_geometry_utils.dart';
 class MultimodalRoutingConfig extends Equatable {
   final double radioMaximoCaminataMetros;
   final int maximoCandidatasPorExtremo;
+  final int maximoOpciones;
 
   const MultimodalRoutingConfig({
     this.radioMaximoCaminataMetros = 800,
     this.maximoCandidatasPorExtremo = 8,
+    this.maximoOpciones = 4,
   });
 
   @override
   List<Object?> get props => [
     radioMaximoCaminataMetros,
     maximoCandidatasPorExtremo,
+    maximoOpciones,
   ];
 }
 
@@ -51,11 +54,19 @@ class MultimodalRoutingEngine {
     required GrafoTransporte grafo,
     required SolicitudRutaMultimodal solicitud,
   }) async {
+    final opciones = await calcularOpciones(grafo: grafo, solicitud: solicitud);
+    return opciones.isEmpty ? null : opciones.first;
+  }
+
+  Future<List<ResultadoRutaMultimodal>> calcularOpciones({
+    required GrafoTransporte grafo,
+    required SolicitudRutaMultimodal solicitud,
+  }) async {
     final grafoBase = solicitud.transportesPermitidos == null
         ? grafo
         : grafo.filtrarPorTransportes(solicitud.transportesPermitidos!);
 
-    if (grafoBase.estadisticas.aristasViaje == 0) return null;
+    if (grafoBase.estadisticas.aristasViaje == 0) return const [];
 
     final origen = OrigenConsulta(
       latitud: solicitud.origen.latitude,
@@ -75,7 +86,7 @@ class MultimodalRoutingEngine {
       solicitud.destino,
     );
 
-    if (candidatasAcceso.isEmpty || candidatasEgreso.isEmpty) return null;
+    if (candidatasAcceso.isEmpty || candidatasEgreso.isEmpty) return const [];
 
     final aristasTemporales = <AristaGrafo>[];
     await _agregarCaminatasDeAcceso(
@@ -91,22 +102,46 @@ class MultimodalRoutingEngine {
       aristas: aristasTemporales,
     );
 
-    if (aristasTemporales.isEmpty) return null;
+    final accesos = aristasTemporales
+        .where((a) => a.origen == origen)
+        .toList(growable: false);
+    final egresos = aristasTemporales
+        .where((a) => a.destino == destino)
+        .toList(growable: false);
 
-    final grafoConsulta = GrafoTransporte(
-      nodos: [...grafoBase.nodos, origen, destino],
-      aristas: [...grafoBase.aristas, ...aristasTemporales],
-      diagnosticos: grafoBase.diagnosticos,
+    if (accesos.isEmpty || egresos.isEmpty) return const [];
+
+    final resultados = <ResultadoRutaMultimodal>[];
+    final firmas = <String>{};
+
+    for (final acceso in accesos) {
+      for (final egreso in egresos) {
+        final grafoConsulta = GrafoTransporte(
+          nodos: [...grafoBase.nodos, origen, destino],
+          aristas: [...grafoBase.aristas, acceso, egreso],
+          diagnosticos: grafoBase.diagnosticos,
+        );
+
+        final resultadoDijkstra = dijkstraRouter.rutaMasCorta(
+          grafoConsulta,
+          origen,
+          destino,
+        );
+        if (resultadoDijkstra == null) continue;
+
+        final firma = _firmaRuta(resultadoDijkstra.aristas);
+        if (!firmas.add(firma)) continue;
+
+        resultados.add(
+          await _crearResultado(resultadoDijkstra.aristas, grafoConsulta),
+        );
+      }
+    }
+
+    resultados.sort(
+      (a, b) => a.tiempoTotalSegundos.compareTo(b.tiempoTotalSegundos),
     );
-
-    final resultadoDijkstra = dijkstraRouter.rutaMasCorta(
-      grafoConsulta,
-      origen,
-      destino,
-    );
-    if (resultadoDijkstra == null) return null;
-
-    return _crearResultado(resultadoDijkstra.aristas, grafoConsulta);
+    return resultados.take(config.maximoOpciones).toList(growable: false);
   }
 
   List<CandidataParada> seleccionarCandidatasAcceso(
@@ -288,7 +323,16 @@ class MultimodalRoutingEngine {
     }
 
     if (arista.tipo == TipoAristaGrafo.viaje) {
-      return parsearGeometriaTrayectoria(arista.geometria);
+      final geometria = parsearGeometriaTrayectoria(arista.geometria);
+      if (geometria.length >= 2) return geometria;
+
+      final origen = _coordenadaNodo(arista.origen);
+      final destino = _coordenadaNodo(arista.destino);
+      if (origen == null || destino == null) return geometria;
+      return [
+        [origen.latitude, origen.longitude],
+        [destino.latitude, destino.longitude],
+      ];
     }
 
     if (arista.tipo == TipoAristaGrafo.transbordo) {
@@ -320,6 +364,12 @@ class MultimodalRoutingEngine {
       return LatLng(latitud, longitud);
     }
     if (nodo is ParadaEgreso) {
+      final latitud = nodo.latitud;
+      final longitud = nodo.longitud;
+      if (latitud == null || longitud == null) return null;
+      return LatLng(latitud, longitud);
+    }
+    if (nodo is ParadaEnRuta) {
       final latitud = nodo.latitud;
       final longitud = nodo.longitud;
       if (latitud == null || longitud == null) return null;
@@ -385,5 +435,12 @@ class MultimodalRoutingEngine {
       }
       destino.add(coordenada);
     }
+  }
+
+  String _firmaRuta(List<AristaGrafo> aristas) {
+    return aristas
+        .where((a) => a.tipo != TipoAristaGrafo.caminata)
+        .map((a) => '${a.tipo.name}:${a.origen.clave}:${a.destino.clave}')
+        .join('|');
   }
 }

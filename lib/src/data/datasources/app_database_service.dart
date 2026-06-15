@@ -5,7 +5,7 @@ import 'package:sqflite/sqflite.dart';
 
 // Incrementa este número cada vez que reemplaces el asset rutikal_db.sqlite.
 // Al arrancar, si el valor guardado en la DB no coincide, se re-copia el asset.
-const _kAssetVersion = 3;
+const _kAssetVersion = 4;
 
 class AppDatabaseService {
   AppDatabaseService({this.dbName = 'rutikal_db.sqlite'});

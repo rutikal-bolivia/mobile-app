@@ -225,7 +225,7 @@ void main() {
       );
     });
 
-    test('avisa cuando trayectoria_intervalo esta vacia', () {
+    test('crea viajes rectos cuando trayectoria_intervalo esta vacia', () {
       final snapshotSinTrayectorias = TransportGraphSnapshot(
         mediosTransporte: snapshot.mediosTransporte,
         rutas: snapshot.rutas,
@@ -242,10 +242,25 @@ void main() {
         contexto,
       );
 
-      expect(grafoSinTrayectorias.estadisticas.aristasViaje, 0);
+      final inicio = _nodo<ParadaEnRuta>(grafoSinTrayectorias, 101);
+      final fin = _nodo<ParadaEnRuta>(grafoSinTrayectorias, 102);
+      final viaje = _arista(
+        grafoSinTrayectorias,
+        inicio,
+        fin,
+        TipoAristaGrafo.viaje,
+      );
+
+      expect(grafoSinTrayectorias.estadisticas.aristasViaje, greaterThan(0));
+      expect(viaje.geometria, isNull);
+      expect(viaje.geometriaCoordenadas, [
+        [-16.5, -68.1],
+        [-16.51, -68.11],
+      ]);
+      expect(viaje.distanciaMetros, isNotNull);
       expect(
         grafoSinTrayectorias.diagnosticos.map((d) => d.codigo),
-        contains('trayectoria_intervalo_vacia'),
+        containsAll(['trayectoria_intervalo_vacia', 'viajes_rectos_fallback']),
       );
     });
 

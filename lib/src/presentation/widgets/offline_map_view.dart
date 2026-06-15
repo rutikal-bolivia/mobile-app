@@ -15,6 +15,8 @@ import '../bloc/routing_bloc.dart';
 import '../bloc/routing_state.dart';
 import '../bloc/location_bloc.dart';
 import '../bloc/location_event.dart';
+import '../../domain/models/multimodal_route.dart';
+import '../../domain/models/transport_graph.dart';
 
 class OfflineMapView extends StatefulWidget {
   const OfflineMapView({super.key, required this.styleString});
@@ -25,9 +27,14 @@ class OfflineMapView extends StatefulWidget {
   State<OfflineMapView> createState() => _OfflineMapViewState();
 }
 
-class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObserver {
+class _OfflineMapViewState extends State<OfflineMapView>
+    with WidgetsBindingObserver {
   static const String _routeSourceId = 'route-source';
   static const String _routeLayerId = 'route-layer';
+  static const String _walkRouteSourceId = 'walk-route-source';
+  static const String _walkRouteLayerId = 'walk-route-layer';
+  static const String _transitRouteSourceId = 'transit-route-source';
+  static const String _transitRouteLayerId = 'transit-route-layer';
 
   MapLibreMapController? _controller;
   Circle? _currentCircle;
@@ -39,6 +46,9 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
   // setGeoJsonSource (barato) en vez de remove/add de una annotation.
   bool _routeLayerReady = false;
   List<List<double>>? _pendingRoute;
+  ResultadoRutaMultimodal? _pendingMultimodalRoute;
+  final List<Circle> _routeStopCircles = [];
+  final List<Symbol> _routeStopSymbols = [];
 
   // Seguimiento local para evitar el snap-back y redundancia
   LatLng? _lastMarkerPosition;
@@ -85,10 +95,44 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
           lineCap: 'round',
         ),
       );
+      await controller.addSource(
+        _walkRouteSourceId,
+        GeojsonSourceProperties(data: _emptyFeatureCollection()),
+      );
+      await controller.addLineLayer(
+        _walkRouteSourceId,
+        _walkRouteLayerId,
+        const LineLayerProperties(
+          lineColor: '#00AAFF',
+          lineWidth: 5.0,
+          lineOpacity: 0.85,
+          lineJoin: 'round',
+          lineCap: 'round',
+        ),
+      );
+      await controller.addSource(
+        _transitRouteSourceId,
+        GeojsonSourceProperties(data: _emptyFeatureCollection()),
+      );
+      await controller.addLineLayer(
+        _transitRouteSourceId,
+        _transitRouteLayerId,
+        const LineLayerProperties(
+          lineColor: '#1F8A4C',
+          lineWidth: 5.5,
+          lineOpacity: 0.9,
+          lineJoin: 'round',
+          lineCap: 'round',
+        ),
+      );
       _routeLayerReady = true;
       // Si llegó una ruta antes de tener la capa lista, la aplicamos ahora.
+      if (_pendingMultimodalRoute != null) {
+        await _drawMultimodalRoute(_pendingMultimodalRoute!);
+        _pendingMultimodalRoute = null;
+      }
       if (_pendingRoute != null) {
-        await _drawRoute(_pendingRoute!);
+        await _drawFallbackRoute(_pendingRoute!);
         _pendingRoute = null;
       }
     } catch (e) {
@@ -106,7 +150,9 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
             'geometry': {
               'type': 'LineString',
               // GeoJSON usa [lon, lat]; el routing entrega [lat, lon].
-              'coordinates': [for (final c in coords) [c[1], c[0]]],
+              'coordinates': [
+                for (final c in coords) [c[1], c[0]],
+              ],
             },
             'properties': <String, dynamic>{},
           },
@@ -114,11 +160,47 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
     };
   }
 
+  Map<String, dynamic> _emptyFeatureCollection() {
+    return {'type': 'FeatureCollection', 'features': <Map<String, dynamic>>[]};
+  }
+
+  Map<String, dynamic> _segmentosGeoJson(
+    ResultadoRutaMultimodal resultado, {
+    required bool caminata,
+  }) {
+    final features = <Map<String, dynamic>>[];
+    for (final segmento in resultado.segmentos) {
+      final esCaminata =
+          segmento.tipo == TipoSegmentoRuta.caminata ||
+          segmento.tipo == TipoSegmentoRuta.transbordo;
+      if (esCaminata != caminata || segmento.coordenadas.length < 2) continue;
+      features.add({
+        'type': 'Feature',
+        'geometry': {
+          'type': 'LineString',
+          'coordinates': [
+            for (final c in segmento.coordenadas) [c[1], c[0]],
+          ],
+        },
+        'properties': {'tipo': segmento.tipo.name},
+      });
+    }
+    return {'type': 'FeatureCollection', 'features': features};
+  }
+
   void _onMapCreated(MapLibreMapController controller) {
     _controller = controller;
-    
+
     // Escuchar el arrastre
-    _controller!.onFeatureDrag.add((point, current, delta, origin, id, annotation, eventType) {
+    _controller!.onFeatureDrag.add((
+      point,
+      current,
+      delta,
+      origin,
+      id,
+      annotation,
+      eventType,
+    ) {
       if (eventType == DragEventType.end) {
         if (_currentCircle != null && id == _currentCircle!.id) {
           debugPrint('[MAP] Drag ended at $current');
@@ -138,7 +220,7 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
     _onCameraMove(controller.cameraPosition!);
   }
 
-  Future<void> _drawRoute(List<List<double>> coordinates) async {
+  Future<void> _drawFallbackRoute(List<List<double>> coordinates) async {
     final controller = _controller;
     if (controller == null) return;
 
@@ -149,8 +231,46 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
       return;
     }
 
-    debugPrint('[MAP] Actualizando capa de ruta con ${coordinates.length} puntos');
-    await controller.setGeoJsonSource(_routeSourceId, _routeGeoJson(coordinates));
+    debugPrint(
+      '[MAP] Actualizando capa de ruta con ${coordinates.length} puntos',
+    );
+    await controller.setGeoJsonSource(
+      _routeSourceId,
+      _routeGeoJson(coordinates),
+    );
+    await controller.setGeoJsonSource(
+      _walkRouteSourceId,
+      _emptyFeatureCollection(),
+    );
+    await controller.setGeoJsonSource(
+      _transitRouteSourceId,
+      _emptyFeatureCollection(),
+    );
+    await _clearRouteStops();
+  }
+
+  Future<void> _drawMultimodalRoute(ResultadoRutaMultimodal resultado) async {
+    final controller = _controller;
+    if (controller == null) return;
+
+    if (!_routeLayerReady) {
+      _pendingMultimodalRoute = resultado;
+      return;
+    }
+
+    debugPrint(
+      '[MAP] Dibujando ruta multimodal con ${resultado.segmentos.length} segmentos',
+    );
+    await controller.setGeoJsonSource(_routeSourceId, _routeGeoJson(const []));
+    await controller.setGeoJsonSource(
+      _walkRouteSourceId,
+      _segmentosGeoJson(resultado, caminata: true),
+    );
+    await controller.setGeoJsonSource(
+      _transitRouteSourceId,
+      _segmentosGeoJson(resultado, caminata: false),
+    );
+    await _drawRouteStops(resultado);
   }
 
   void _onMapClick(Point<double> point, LatLng latLng) {
@@ -163,15 +283,16 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
 
   Future<void> _animateToLocation(LatLng location) async {
     if (_controller == null) return;
-    
-    final currentZoom = _controller!.cameraPosition?.zoom ?? MapConfig.initialZoom;
+
+    final currentZoom =
+        _controller!.cameraPosition?.zoom ?? MapConfig.initialZoom;
     final midZoom = (currentZoom < 12) ? currentZoom - 1 : 11.0;
 
     await _controller!.animateCamera(
       CameraUpdate.newLatLngZoom(location, midZoom),
       duration: const Duration(milliseconds: 600),
     );
-    
+
     await _controller!.animateCamera(
       CameraUpdate.newLatLngZoom(location, MapConfig.searchZoom),
       duration: const Duration(milliseconds: 700),
@@ -182,7 +303,7 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
     if (_controller == null) return;
 
     // Si la posición es la misma que la que ya tiene el círculo (o la última conocida),
-    // no hacemos nada. Esto evita el "snap-back" si el estado del Bloc 
+    // no hacemos nada. Esto evita el "snap-back" si el estado del Bloc
     // todavía tiene la posición antigua o si se dispara un redraw innecesario.
     if (_currentCircle != null && markerCoordinate == _lastMarkerPosition) {
       debugPrint('[MAP] Skipping marker update, already at $markerCoordinate');
@@ -193,23 +314,25 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
       await _controller!.removeCircle(_currentCircle!);
       _currentCircle = null;
     }
-    
+
     if (_markerDot != null) {
       await _controller!.removeCircle(_markerDot!);
       _markerDot = null;
     }
 
     if (markerCoordinate != null) {
-      debugPrint('[MAP] Drawing new red marker with black dot at $markerCoordinate');
+      debugPrint(
+        '[MAP] Drawing new red marker with black dot at $markerCoordinate',
+      );
       _lastMarkerPosition = markerCoordinate;
-      
+
       // Primero dibujamos el marcador rojo (área de toque)
       _currentCircle = await _controller!.addCircle(
         CircleOptions(
           geometry: markerCoordinate,
           circleRadius: 22.0, // Área de toque más grande
           circleColor: '#FF0000', // Rojo
-          circleOpacity: 0.6,    // Semi-transparente para que no tape tanto
+          circleOpacity: 0.6, // Semi-transparente para que no tape tanto
           circleStrokeWidth: 2.0,
           circleStrokeColor: '#FFFFFF',
           draggable: true,
@@ -223,7 +346,8 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
           circleRadius: 3.0, // Punto pequeño y preciso
           circleColor: '#000000', // Negro
           circleOpacity: 1.0,
-          draggable: false, // El punto no se arrastra solo, se arrastra con el rojo
+          draggable:
+              false, // El punto no se arrastra solo, se arrastra con el rojo
         ),
       );
     }
@@ -243,7 +367,7 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
 
     if (result != null) {
       // Ya no dibujamos el círculo azul porque ahora se usa el marcador rojo
-      
+
       _searchText = await _controller!.addSymbol(
         SymbolOptions(
           geometry: result.location,
@@ -259,6 +383,72 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
     }
   }
 
+  Future<void> _clearRouteStops() async {
+    final controller = _controller;
+    if (controller == null) return;
+    for (final circle in _routeStopCircles) {
+      await controller.removeCircle(circle);
+    }
+    for (final symbol in _routeStopSymbols) {
+      await controller.removeSymbol(symbol);
+    }
+    _routeStopCircles.clear();
+    _routeStopSymbols.clear();
+  }
+
+  Future<void> _drawRouteStops(ResultadoRutaMultimodal resultado) async {
+    final controller = _controller;
+    if (controller == null) return;
+    await _clearRouteStops();
+
+    final paradas = <String, ParadaEnRuta>{};
+    for (final segmento in resultado.segmentos) {
+      if (segmento.origen is ParadaEnRuta) {
+        final parada = segmento.origen as ParadaEnRuta;
+        paradas[parada.clave] = parada;
+      }
+      if (segmento.destino is ParadaEnRuta) {
+        final parada = segmento.destino as ParadaEnRuta;
+        paradas[parada.clave] = parada;
+      }
+    }
+
+    for (final parada in paradas.values) {
+      final latitud = parada.latitud;
+      final longitud = parada.longitud;
+      if (latitud == null || longitud == null) continue;
+      final esTeleferico = parada.transporteId == 2;
+      final color = esTeleferico ? '#E2231A' : '#1F8A4C';
+      final texto = esTeleferico ? 'T' : 'B';
+      final punto = LatLng(latitud, longitud);
+
+      _routeStopCircles.add(
+        await controller.addCircle(
+          CircleOptions(
+            geometry: punto,
+            circleRadius: 9,
+            circleColor: color,
+            circleOpacity: 0.95,
+            circleStrokeWidth: 2,
+            circleStrokeColor: '#FFFFFF',
+          ),
+        ),
+      );
+      _routeStopSymbols.add(
+        await controller.addSymbol(
+          SymbolOptions(
+            geometry: punto,
+            textField: texto,
+            textSize: 11,
+            textColor: '#FFFFFF',
+            textHaloColor: color,
+            textHaloWidth: 0.5,
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MultiBlocListener(
@@ -267,13 +457,22 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
         BlocListener<RoutingBloc, RoutingState>(
           listener: (context, state) {
             if (state is RoutingSuccess) {
-              _drawRoute(state.coordinates);
+              if (state.resultadoMultimodal != null) {
+                _drawMultimodalRoute(state.resultadoMultimodal!);
+              } else {
+                _drawFallbackRoute(state.coordinates);
+              }
+            } else if (state is RoutingOptionsFound) {
+              _drawFallbackRoute(const []);
             } else if (state is RoutingError) {
               // Limpiamos la ruta anterior para no dejar una línea "fantasma"
               // que parezca un resultado válido cuando en realidad falló.
-              _drawRoute(const []);
+              _drawFallbackRoute(const []);
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(state.message), backgroundColor: Colors.red),
+                SnackBar(
+                  content: Text(state.message),
+                  backgroundColor: Colors.red,
+                ),
               );
             }
           },
@@ -296,17 +495,19 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
         BlocListener<MapBloc, MapState>(
           listenWhen: (previous, current) {
             if (previous is MapReady && current is MapReady) {
-              return previous.cameraMoveRequested != current.cameraMoveRequested ||
-                     previous.highlightedSearchResult != current.highlightedSearchResult ||
-                     current.zoomInRequested ||
-                     current.zoomOutRequested;
+              return previous.cameraMoveRequested !=
+                      current.cameraMoveRequested ||
+                  previous.highlightedSearchResult !=
+                      current.highlightedSearchResult ||
+                  current.zoomInRequested ||
+                  current.zoomOutRequested;
             }
             return current is MapReady;
           },
           listener: (context, state) {
             if (state is MapReady) {
               _updateSearchHighlight(state.highlightedSearchResult);
-              
+
               if (state.cameraMoveRequested != null) {
                 _animateToLocation(state.cameraMoveRequested!);
               }
@@ -327,7 +528,10 @@ class _OfflineMapViewState extends State<OfflineMapView> with WidgetsBindingObse
           zoom: MapConfig.initialZoom,
         ),
         styleString: widget.styleString,
-        minMaxZoomPreference: const MinMaxZoomPreference(null, MapConfig.maxZoom),
+        minMaxZoomPreference: const MinMaxZoomPreference(
+          null,
+          MapConfig.maxZoom,
+        ),
         onMapCreated: _onMapCreated,
         onStyleLoadedCallback: _onStyleLoaded,
         onMapClick: _onMapClick,
@@ -344,17 +548,17 @@ Widget previewOfflineMapView() {
   return MultiBlocProvider(
     providers: [
       BlocProvider<LocationBloc>(
-        create: (_) => LocationBloc(repository: MockLocationRepository())..add(LocationStarted()),
+        create: (_) =>
+            LocationBloc(repository: MockLocationRepository())
+              ..add(LocationStarted()),
       ),
       BlocProvider<MapBloc>(
-        create: (_) => MapBloc(repository: MockMapRepository())..add(const MapPrepareRequested()),
+        create: (_) =>
+            MapBloc(repository: MockMapRepository())
+              ..add(const MapPrepareRequested()),
       ),
-      BlocProvider<RoutingBloc>(
-        create: (_) => RoutingBloc(),
-      ),
+      BlocProvider<RoutingBloc>(create: (_) => RoutingBloc()),
     ],
-    child: const Scaffold(
-      body: MockMapView(styleString: 'mock_style'),
-    ),
+    child: const Scaffold(body: MockMapView(styleString: 'mock_style')),
   );
 }

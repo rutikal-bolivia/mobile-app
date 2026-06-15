@@ -104,6 +104,9 @@ class ParadaEnRuta extends NodoGrafo {
   final int paradaId;
   final int sentido;
   final int orden;
+  final String nombreParada;
+  final double? latitud;
+  final double? longitud;
 
   const ParadaEnRuta({
     required super.id,
@@ -112,13 +115,25 @@ class ParadaEnRuta extends NodoGrafo {
     required this.paradaId,
     required this.sentido,
     required this.orden,
+    required this.nombreParada,
+    required this.latitud,
+    required this.longitud,
   });
 
   @override
   TipoNodoGrafo get tipo => TipoNodoGrafo.paradaEnRuta;
 
   @override
-  List<Object?> get props => [...super.props, rutaId, paradaId, sentido, orden];
+  List<Object?> get props => [
+    ...super.props,
+    rutaId,
+    paradaId,
+    sentido,
+    orden,
+    nombreParada,
+    latitud,
+    longitud,
+  ];
 }
 
 abstract class NodoConsulta extends NodoGrafo {

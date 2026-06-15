@@ -7,6 +7,12 @@ class RoutingInitial extends RoutingState {}
 
 class RoutingLoading extends RoutingState {}
 
+class RoutingOptionsFound extends RoutingState {
+  final List<ResultadoRutaMultimodal> opciones;
+
+  RoutingOptionsFound(this.opciones);
+}
+
 class RoutingError extends RoutingState {
   final String message;
   RoutingError(this.message);
