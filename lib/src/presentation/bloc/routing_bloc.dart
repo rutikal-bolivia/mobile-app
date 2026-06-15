@@ -34,6 +34,7 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
   final CargarGrafoNativo cargarGrafoNativo;
   final CalcularRutaNativa calcularRutaNativa;
   GrafoTransporte? _grafoTransporte;
+  OpcionesRutaAgrupadas? _ultimasOpciones;
   StreamSubscription<void>? _syncSub;
 
   RoutingBloc({
@@ -89,7 +90,7 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
     });
 
     on<CalculateRouteRequested>((event, emit) async {
-      emit(RoutingLoading());
+      emit(RoutingSearching());
       try {
         debugPrint("=== [ROUTING] Petición de ruta recibida ===");
         debugPrint(
@@ -105,17 +106,23 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
         final endLat = event.destination.latitude;
         final endLon = event.destination.longitude;
 
-        final opcionesMultimodales = await _intentarRutasMultimodales(event);
-        if (opcionesMultimodales.isNotEmpty) {
-          final mejor = opcionesMultimodales.first;
+        final opcionesAgrupadas = await _intentarRutasMultimodales(event);
+        if (!opcionesAgrupadas.isEmpty) {
+          _ultimasOpciones = opcionesAgrupadas;
+          final mejor = opcionesAgrupadas.todas.reduce(
+            (a, b) => a.tiempoTotalSegundos <= b.tiempoTotalSegundos ? a : b,
+          );
           final tipos = mejor.segmentos.map((s) => s.tipo.name).join('→');
           final muestra = mejor.coordenadas.take(3).toList();
           debugPrint(
-            "=== [ROUTING] Opciones multimodales: ${opcionesMultimodales.length} "
+            "=== [ROUTING] Opciones multimodales: ${opcionesAgrupadas.todas.length} "
+            "| puma=${opcionesAgrupadas.soloPumakatari.length} "
+            "| teleferico=${opcionesAgrupadas.soloTeleferico.length} "
+            "| ambos=${opcionesAgrupadas.multimodal.length} "
             "| mejor=${mejor.segmentos.length} segmentos | $tipos | ${mejor.coordenadas.length} pts ===",
           );
           debugPrint("=== [ROUTING] Primeras coords [lat,lon]: $muestra ===");
-          emit(RoutingOptionsFound(opcionesMultimodales));
+          emit(RoutingOptionsFound(opcionesAgrupadas));
           return;
         }
 
@@ -153,8 +160,16 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
         RoutingSuccess(
           event.resultado.coordenadas,
           resultadoMultimodal: event.resultado,
+          opcionesAgrupadas: _ultimasOpciones,
         ),
       );
+    });
+
+    on<ReturnToRouteOptionsRequested>((event, emit) {
+      final opciones = _ultimasOpciones;
+      if (opciones != null && !opciones.isEmpty) {
+        emit(RoutingOptionsFound(opciones));
+      }
     });
   }
 
@@ -195,13 +210,13 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
     }
   }
 
-  Future<List<ResultadoRutaMultimodal>> _intentarRutasMultimodales(
+  Future<OpcionesRutaAgrupadas> _intentarRutasMultimodales(
     CalculateRouteRequested event,
   ) async {
     final grafo = _grafoTransporte;
     if (grafo == null) {
       debugPrint('=== [ROUTING] ❌ Grafo multimodal es null ===');
-      return const [];
+      return const OpcionesRutaAgrupadas();
     }
     if (grafo.estadisticas.aristasViaje == 0) {
       debugPrint(
@@ -210,7 +225,7 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
         'nodos=${grafo.estadisticas.nodos} '
         'aristas=${grafo.estadisticas.aristas} ===',
       );
-      return const [];
+      return const OpcionesRutaAgrupadas();
     }
 
     debugPrint(
@@ -235,21 +250,31 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
 
     if (candidatasAcceso.isEmpty) {
       debugPrint('=== [ROUTING] ❌ Sin paradas dentro del radio de origen ===');
-      return const [];
+      return const OpcionesRutaAgrupadas();
     }
     if (candidatasEgreso.isEmpty) {
       debugPrint('=== [ROUTING] ❌ Sin paradas dentro del radio de destino ===');
-      return const [];
+      return const OpcionesRutaAgrupadas();
     }
 
     try {
-      final opciones = await multimodalRoutingEngine.calcularOpciones(
-        grafo: grafo,
-        solicitud: SolicitudRutaMultimodal(
-          origen: event.origin,
-          destino: event.destination,
-        ),
-      );
+      final opciones = await multimodalRoutingEngine
+          .calcularOpcionesAgrupadas(
+            grafo: grafo,
+            solicitud: SolicitudRutaMultimodal(
+              origen: event.origin,
+              destino: event.destination,
+            ),
+          )
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () {
+              debugPrint(
+                '=== [ROUTING] ❌ Motor multimodal excedió 10s; usando fallback ===',
+              );
+              return const OpcionesRutaAgrupadas();
+            },
+          );
       if (opciones.isEmpty) {
         debugPrint(
           '=== [ROUTING] ❌ Motor devolvió null — '
@@ -259,7 +284,7 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
       return opciones;
     } catch (e) {
       debugPrint('=== [ROUTING] ❌ Excepción en motor multimodal: $e ===');
-      return const [];
+      return const OpcionesRutaAgrupadas();
     }
   }
 }

@@ -18,3 +18,5 @@ class SelectRouteOptionRequested extends RoutingEvent {
 
   SelectRouteOptionRequested(this.resultado);
 }
+
+class ReturnToRouteOptionsRequested extends RoutingEvent {}

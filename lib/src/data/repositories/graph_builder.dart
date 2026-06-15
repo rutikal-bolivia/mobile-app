@@ -121,7 +121,9 @@ class GraphBuilder {
     _agregarAristasTransbordo(
       transbordos: snapshot.transbordos,
       rutasParadasValidas: rutasParadasValidas,
+      rutasActivas: rutasActivas,
       enRutaPorId: enRutaPorId,
+      frecuenciasPorRuta: frecuenciasPorRuta,
       aristas: aristas,
       diagnosticos: diagnosticos,
     );
@@ -161,7 +163,10 @@ class GraphBuilder {
       final frecuenciaMinutos =
           frecuenciasPorRuta[rutaParada.rutaId] ??
           config.frecuenciaPorDefectoMinutos;
-      final esperaSegundos = (frecuenciaMinutos * 60 / 2).round();
+      final esperaSegundos = _esperaAbordajeSegundos(
+        ruta: ruta,
+        frecuenciaMinutos: frecuenciaMinutos,
+      );
 
       aristas.add(
         AristaGrafo(
@@ -362,8 +367,10 @@ class GraphBuilder {
   }
 
   double _velocidadFallback(int? transporteId) {
-    if (transporteId == 1) return config.velocidadBusFallbackMetrosPorSegundo;
-    if (transporteId == 2) {
+    if (transporteId == config.transportePumakatariId) {
+      return config.velocidadBusFallbackMetrosPorSegundo;
+    }
+    if (transporteId == config.transporteTelefericoId) {
       return config.velocidadTelefericoFallbackMetrosPorSegundo;
     }
     return config.velocidadFallbackMetrosPorSegundo;
@@ -372,7 +379,9 @@ class GraphBuilder {
   void _agregarAristasTransbordo({
     required List<TransbordoRegistro> transbordos,
     required List<RutaParadaRegistro> rutasParadasValidas,
+    required Map<int, RutaRegistro> rutasActivas,
     required Map<int, ParadaEnRuta> enRutaPorId,
+    required Map<int, int> frecuenciasPorRuta,
     required List<AristaGrafo> aristas,
     required List<DiagnosticoGrafo> diagnosticos,
   }) {
@@ -423,11 +432,21 @@ class GraphBuilder {
         for (final destinoRegistro in destinos) {
           final origen = enRutaPorId[origenRegistro.id]!;
           final destino = enRutaPorId[destinoRegistro.id]!;
+          final rutaDestino = rutasActivas[destinoRegistro.rutaId]!;
+          final frecuenciaDestino =
+              frecuenciasPorRuta[destinoRegistro.rutaId] ??
+              config.frecuenciaPorDefectoMinutos;
           aristas.add(
             AristaGrafo(
               origen: origen,
               destino: destino,
-              pesoSegundos: transbordo.tiempoEstimadoSegundos,
+              pesoSegundos:
+                  transbordo.tiempoEstimadoSegundos +
+                  config.penalizacionTransbordoSegundos +
+                  _esperaTransbordoDestinoSegundos(
+                    rutaDestino: rutaDestino,
+                    frecuenciaMinutos: frecuenciaDestino,
+                  ),
               tipo: TipoAristaGrafo.transbordo,
               distanciaMetros: transbordo.distanciaMetros,
               transbordoId: transbordo.id,
@@ -441,6 +460,38 @@ class GraphBuilder {
         }
       }
     }
+  }
+
+  int _esperaAbordajeSegundos({
+    required RutaRegistro ruta,
+    required int frecuenciaMinutos,
+  }) {
+    // Teleférico se modela sin espera operacional: es continuo y no requiere
+    // esperar un vehículo específico como en Pumakatari.
+    if (ruta.transporteId == config.transporteTelefericoId) return 0;
+
+    final esperaMedia = (frecuenciaMinutos * 60 / 2).round();
+    if (ruta.transporteId != config.transportePumakatariId) {
+      return esperaMedia;
+    }
+
+    return esperaMedia
+        .clamp(
+          config.esperaMinimaPumakatariSegundos,
+          config.esperaMaximaPumakatariSegundos,
+        )
+        .toInt();
+  }
+
+  int _esperaTransbordoDestinoSegundos({
+    required RutaRegistro rutaDestino,
+    required int frecuenciaMinutos,
+  }) {
+    if (rutaDestino.transporteId == config.transporteTelefericoId) return 0;
+    return _esperaAbordajeSegundos(
+      ruta: rutaDestino,
+      frecuenciaMinutos: frecuenciaMinutos,
+    );
   }
 
   Map<int, int> _frecuenciasAplicablesPorRuta(

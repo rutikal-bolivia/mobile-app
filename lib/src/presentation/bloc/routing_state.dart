@@ -7,10 +7,14 @@ class RoutingInitial extends RoutingState {}
 
 class RoutingLoading extends RoutingState {}
 
-class RoutingOptionsFound extends RoutingState {
-  final List<ResultadoRutaMultimodal> opciones;
+class RoutingSearching extends RoutingState {}
 
-  RoutingOptionsFound(this.opciones);
+class RoutingOptionsFound extends RoutingState {
+  final OpcionesRutaAgrupadas opcionesAgrupadas;
+
+  RoutingOptionsFound(this.opcionesAgrupadas);
+
+  List<ResultadoRutaMultimodal> get opciones => opcionesAgrupadas.todas;
 }
 
 class RoutingError extends RoutingState {
@@ -21,6 +25,11 @@ class RoutingError extends RoutingState {
 class RoutingSuccess extends RoutingState {
   final List<List<double>> coordinates;
   final ResultadoRutaMultimodal? resultadoMultimodal;
+  final OpcionesRutaAgrupadas? opcionesAgrupadas;
 
-  RoutingSuccess(this.coordinates, {this.resultadoMultimodal});
+  RoutingSuccess(
+    this.coordinates, {
+    this.resultadoMultimodal,
+    this.opcionesAgrupadas,
+  });
 }

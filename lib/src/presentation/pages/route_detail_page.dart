@@ -18,6 +18,7 @@ import 'map_layout.dart';
 import '../../domain/repositories/location_repository.dart';
 import '../../data/datasources/app_database_service.dart';
 import '../../data/repositories/favorites_repository_impl.dart';
+import '../widgets/transport_stop_icons.dart';
 
 class RouteDetailMapController {
   MapLibreMapController? mapController;
@@ -63,22 +64,30 @@ class RouteDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final repo = routesRepository ?? RoutesRepositoryImpl(dbService: AppDatabaseService());
+    final repo =
+        routesRepository ??
+        RoutesRepositoryImpl(dbService: AppDatabaseService());
     return MultiBlocProvider(
       providers: [
         BlocProvider(
-          create: (_) => RouteDetailBloc(
-            repository: repo,
-            favoritesRepository: FavoritesRepositoryImpl(dbService: AppDatabaseService()),
-          )..add(RouteDetailLoadRequested(
-              routeId: route.id,
-              sentido: 1,
-              focusStopId: initialStopId,
-            )),
+          create: (_) =>
+              RouteDetailBloc(
+                repository: repo,
+                favoritesRepository: FavoritesRepositoryImpl(
+                  dbService: AppDatabaseService(),
+                ),
+              )..add(
+                RouteDetailLoadRequested(
+                  routeId: route.id,
+                  sentido: 1,
+                  focusStopId: initialStopId,
+                ),
+              ),
         ),
         BlocProvider(
-          create: (_) => LocationBloc(repository: LocationRepositoryImpl())
-            ..add(LocationStarted()),
+          create: (_) =>
+              LocationBloc(repository: LocationRepositoryImpl())
+                ..add(LocationStarted()),
         ),
       ],
       child: _RouteDetailPageContent(route: route),
@@ -92,7 +101,8 @@ class _RouteDetailPageContent extends StatefulWidget {
   const _RouteDetailPageContent({required this.route});
 
   @override
-  State<_RouteDetailPageContent> createState() => _RouteDetailPageContentState();
+  State<_RouteDetailPageContent> createState() =>
+      _RouteDetailPageContentState();
 }
 
 class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
@@ -107,7 +117,9 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
   }
 
   void _updatePopupPosition() async {
-    if (_selectedStop != null && _selectedStop!.latitud != null && _selectedStop!.longitud != null) {
+    if (_selectedStop != null &&
+        _selectedStop!.latitud != null &&
+        _selectedStop!.longitud != null) {
       final loc = LatLng(_selectedStop!.latitud!, _selectedStop!.longitud!);
       final point = await _mapController.toScreenLocation(loc);
       if (point != null && mounted) {
@@ -120,7 +132,9 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
 
   void _centerOnAllStops(List<RouteStop> stops) {
     if (stops.isEmpty) return;
-    final validStops = stops.where((s) => s.latitud != null && s.longitud != null).toList();
+    final validStops = stops
+        .where((s) => s.latitud != null && s.longitud != null)
+        .toList();
     if (validStops.isEmpty) return;
 
     double minLat = 90.0;
@@ -159,13 +173,18 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                   _popupOffset = null;
                 }
               });
-              if (_selectedStop != null && _selectedStop!.latitud != null && _selectedStop!.longitud != null) {
+              if (_selectedStop != null &&
+                  _selectedStop!.latitud != null &&
+                  _selectedStop!.longitud != null) {
                 _mapController.moveCamera(
                   LatLng(_selectedStop!.latitud!, _selectedStop!.longitud!),
                   16.5,
                 );
                 // Dar tiempo a la cámara para iniciar antes de calcular la posición del popup
-                Future.delayed(const Duration(milliseconds: 150), _updatePopupPosition);
+                Future.delayed(
+                  const Duration(milliseconds: 150),
+                  _updatePopupPosition,
+                );
               }
             }
           }
@@ -190,25 +209,38 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                     ),
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF4C025)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFF4C025),
+                      ),
                       onPressed: () {
                         context.read<RouteDetailBloc>().add(
-                              RouteDetailLoadRequested(routeId: widget.route.id, sentido: 1),
-                            );
+                          RouteDetailLoadRequested(
+                            routeId: widget.route.id,
+                            sentido: 1,
+                          ),
+                        );
                       },
-                      child: const Text('Reintentar', style: TextStyle(color: Colors.white)),
-                    )
+                      child: const Text(
+                        'Reintentar',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
                   ],
                 ),
               ),
             );
           }
 
-          final List<RouteStop> stops = state is RouteDetailLoaded ? state.stops : [];
-          final List<List<double>> trajectory = state is RouteDetailLoaded ? state.trajectory : [];
+          final List<RouteStop> stops = state is RouteDetailLoaded
+              ? state.stops
+              : [];
+          final List<List<double>> trajectory = state is RouteDetailLoaded
+              ? state.trajectory
+              : [];
           final int sentido = state is RouteDetailLoaded ? state.sentido : 1;
-          final Set<int> favoriteStopIds =
-              state is RouteDetailLoaded ? state.favoriteStopIds : <int>{};
+          final Set<int> favoriteStopIds = state is RouteDetailLoaded
+              ? state.favoriteStopIds
+              : <int>{};
 
           return Stack(
             children: [
@@ -222,6 +254,7 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                       trajectory: trajectory,
                       selectedStop: _selectedStop,
                       routeColor: widget.route.color,
+                      transporteId: widget.route.transporteId,
                       mapController: _mapController,
                       onCameraMove: _updatePopupPosition,
                     );
@@ -266,8 +299,8 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                 child: GestureDetector(
                   onTap: () {
                     context.read<RouteDetailBloc>().add(
-                          RouteDetailFavoriteToggled(routeId: widget.route.id),
-                        );
+                      RouteDetailFavoriteToggled(routeId: widget.route.id),
+                    );
                   },
                   child: Container(
                     width: 44,
@@ -325,11 +358,11 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                           onTap: () {
                             if (sentido != 1) {
                               context.read<RouteDetailBloc>().add(
-                                    RouteDetailSentidoChanged(
-                                      routeId: widget.route.id,
-                                      sentido: 1,
-                                    ),
-                                  );
+                                RouteDetailSentidoChanged(
+                                  routeId: widget.route.id,
+                                  sentido: 1,
+                                ),
+                              );
                             }
                           },
                         ),
@@ -340,11 +373,11 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                           onTap: () {
                             if (sentido != 2) {
                               context.read<RouteDetailBloc>().add(
-                                    RouteDetailSentidoChanged(
-                                      routeId: widget.route.id,
-                                      sentido: 2,
-                                    ),
-                                  );
+                                RouteDetailSentidoChanged(
+                                  routeId: widget.route.id,
+                                  sentido: 2,
+                                ),
+                              );
                             }
                           },
                         ),
@@ -364,7 +397,9 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                     child: Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       child: CustomPaint(
-                        painter: SpeechBubblePainter(color: const Color(0xFF1E293B)),
+                        painter: SpeechBubblePainter(
+                          color: const Color(0xFF1E293B),
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),
                           child: Row(
@@ -384,9 +419,9 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                               const SizedBox(width: 8),
                               GestureDetector(
                                 onTap: () {
-                                  context
-                                      .read<RouteDetailBloc>()
-                                      .add(const RouteDetailStopSelected(null));
+                                  context.read<RouteDetailBloc>().add(
+                                    const RouteDetailStopSelected(null),
+                                  );
                                 },
                                 child: const Icon(
                                   Icons.close_rounded,
@@ -404,7 +439,8 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
 
               // 5. Botones de control flotantes sobre el panel inferior
               Positioned(
-                bottom: (_isPanelExpanded
+                bottom:
+                    (_isPanelExpanded
                         ? MediaQuery.of(context).size.height * 0.50
                         : MediaQuery.of(context).size.height * 0.20) +
                     16,
@@ -451,7 +487,9 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                               15.0,
                             );
                           } else {
-                            context.read<LocationBloc>().add(LocationRequested());
+                            context.read<LocationBloc>().add(
+                              LocationRequested(),
+                            );
                           }
                         },
                       ),
@@ -473,7 +511,9 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                       : MediaQuery.of(context).size.height * 0.20,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.08),
@@ -495,7 +535,10 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                           });
                         },
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 12,
+                            horizontal: 20,
+                          ),
                           child: Row(
                             children: [
                               Expanded(
@@ -546,7 +589,7 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                         ),
                       ),
                       const Divider(height: 1, color: Color(0xFFF1F5F9)),
-                      
+
                       // Listado de paradas scrollable
                       Expanded(
                         child: ListView.builder(
@@ -556,11 +599,13 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                           itemBuilder: (context, index) {
                             final stop = stops[index];
                             final isSelected = _selectedStop?.id == stop.id;
-                            final isStopFav =
-                                favoriteStopIds.contains(stop.id);
+                            final isStopFav = favoriteStopIds.contains(stop.id);
 
                             return ListTile(
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 2,
+                              ),
                               leading: Container(
                                 width: 36,
                                 height: 36,
@@ -580,7 +625,9 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                                       fontFamily: 'Plus Jakarta Sans',
                                       fontSize: 13,
                                       fontWeight: FontWeight.w700,
-                                      color: isSelected ? routeColor : const Color(0xFF475569),
+                                      color: isSelected
+                                          ? routeColor
+                                          : const Color(0xFF475569),
                                     ),
                                   ),
                                 ),
@@ -590,11 +637,17 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                                 style: TextStyle(
                                   fontFamily: 'Plus Jakarta Sans',
                                   fontSize: 14,
-                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                                  color: isSelected ? routeColor : const Color(0xFF1E293B),
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                  color: isSelected
+                                      ? routeColor
+                                      : const Color(0xFF1E293B),
                                 ),
                               ),
-                              subtitle: stop.direccion != null && stop.direccion!.isNotEmpty
+                              subtitle:
+                                  stop.direccion != null &&
+                                      stop.direccion!.isNotEmpty
                                   ? Text(
                                       stop.direccion!,
                                       maxLines: 1,
@@ -614,24 +667,27 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                                     behavior: HitTestBehavior.opaque,
                                     onTap: () {
                                       context.read<RouteDetailBloc>().add(
-                                            RouteDetailStopFavoriteToggled(
-                                                stopId: stop.id),
-                                          );
+                                        RouteDetailStopFavoriteToggled(
+                                          stopId: stop.id,
+                                        ),
+                                      );
                                       ScaffoldMessenger.of(context)
                                         ..hideCurrentSnackBar()
                                         ..showSnackBar(
                                           SnackBar(
-                                            duration:
-                                                const Duration(seconds: 1),
-                                            content: Text(isStopFav
-                                                ? 'Parada quitada de favoritos'
-                                                : 'Parada guardada en favoritos'),
+                                            duration: const Duration(
+                                              seconds: 1,
+                                            ),
+                                            content: Text(
+                                              isStopFav
+                                                  ? 'Parada quitada de favoritos'
+                                                  : 'Parada guardada en favoritos',
+                                            ),
                                           ),
                                         );
                                     },
                                     child: Padding(
-                                      padding:
-                                          const EdgeInsets.only(right: 4),
+                                      padding: const EdgeInsets.only(right: 4),
                                       child: Icon(
                                         isStopFav
                                             ? Icons.star_rounded
@@ -659,17 +715,20 @@ class _RouteDetailPageContentState extends State<_RouteDetailPageContent> {
                                 ],
                               ),
                               onTap: () {
-                                if (stop.latitud != null && stop.longitud != null) {
+                                if (stop.latitud != null &&
+                                    stop.longitud != null) {
                                   setState(() {
                                     _isPanelExpanded = false;
                                   });
-                                  context
-                                      .read<RouteDetailBloc>()
-                                      .add(RouteDetailStopSelected(stop));
+                                  context.read<RouteDetailBloc>().add(
+                                    RouteDetailStopSelected(stop),
+                                  );
                                 } else {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text('Esta parada no tiene coordenadas geográficas registradas.'),
+                                      content: Text(
+                                        'Esta parada no tiene coordenadas geográficas registradas.',
+                                      ),
                                     ),
                                   );
                                 }
@@ -820,6 +879,7 @@ class RouteDetailMapView extends StatefulWidget {
   final List<List<double>> trajectory;
   final RouteStop? selectedStop;
   final String? routeColor;
+  final int transporteId;
   final RouteDetailMapController mapController;
   final VoidCallback onCameraMove;
 
@@ -830,6 +890,7 @@ class RouteDetailMapView extends StatefulWidget {
     required this.trajectory,
     required this.selectedStop,
     required this.routeColor,
+    required this.transporteId,
     required this.mapController,
     required this.onCameraMove,
   });
@@ -874,7 +935,10 @@ class _RouteDetailMapViewState extends State<RouteDetailMapView> {
   void didUpdateWidget(covariant RouteDetailMapView oldWidget) {
     super.didUpdateWidget(oldWidget);
     _setupController();
-    if (_styleLoaded && (oldWidget.stops != widget.stops || oldWidget.trajectory != widget.trajectory)) {
+    if (_styleLoaded &&
+        (oldWidget.stops != widget.stops ||
+            oldWidget.trajectory != widget.trajectory ||
+            oldWidget.selectedStop != widget.selectedStop)) {
       _drawStopsAndTrajectory();
     }
   }
@@ -888,7 +952,7 @@ class _RouteDetailMapViewState extends State<RouteDetailMapView> {
         _routeSourceId,
         GeojsonSourceProperties(data: _routeGeoJson(const [])),
       );
-      
+
       final colorHex = widget.routeColor ?? '#00AAFF';
       await controller.addLineLayer(
         _routeSourceId,
@@ -901,6 +965,9 @@ class _RouteDetailMapViewState extends State<RouteDetailMapView> {
           lineCap: 'round',
         ),
       );
+      await TransportStopIcons.registrarEn(controller);
+      await controller.setSymbolIconAllowOverlap(true);
+      await controller.setSymbolIconIgnorePlacement(true);
 
       _drawStopsAndTrajectory();
     } catch (e) {
@@ -917,7 +984,9 @@ class _RouteDetailMapViewState extends State<RouteDetailMapView> {
             'type': 'Feature',
             'geometry': {
               'type': 'LineString',
-              'coordinates': [for (final c in coords) [c[1], c[0]]],
+              'coordinates': [
+                for (final c in coords) [c[1], c[0]],
+              ],
             },
             'properties': <String, dynamic>{},
           },
@@ -930,23 +999,41 @@ class _RouteDetailMapViewState extends State<RouteDetailMapView> {
     if (controller == null) return;
 
     // 1. Dibujar trayectora
-    await controller.setGeoJsonSource(_routeSourceId, _routeGeoJson(widget.trajectory));
+    await controller.setGeoJsonSource(
+      _routeSourceId,
+      _routeGeoJson(widget.trajectory),
+    );
 
     // 2. Dibujar paradas
     await controller.clearCircles();
+    await controller.clearSymbols();
     final hexColor = widget.routeColor ?? '#39FF14';
+    final iconImage = TransportStopIcons.imagenParaTransporte(
+      widget.transporteId,
+    );
 
     for (final stop in widget.stops) {
       if (stop.latitud != null && stop.longitud != null) {
         final isSelected = widget.selectedStop?.id == stop.id;
-        await controller.addCircle(
-          CircleOptions(
-            geometry: LatLng(stop.latitud!, stop.longitud!),
-            circleRadius: isSelected ? 8.0 : 6.0,
-            circleColor: isSelected ? '#FF0000' : hexColor,
-            circleOpacity: 1.0,
-            circleStrokeWidth: 2.0,
-            circleStrokeColor: '#FFFFFF',
+        final punto = LatLng(stop.latitud!, stop.longitud!);
+        if (isSelected) {
+          await controller.addCircle(
+            CircleOptions(
+              geometry: punto,
+              circleRadius: 16.0,
+              circleColor: hexColor,
+              circleOpacity: 0.22,
+              circleStrokeWidth: 2.0,
+              circleStrokeColor: '#FFFFFF',
+            ),
+          );
+        }
+        await controller.addSymbol(
+          SymbolOptions(
+            geometry: punto,
+            iconImage: iconImage,
+            iconSize: isSelected ? 0.46 : 0.36,
+            iconAnchor: 'center',
           ),
         );
       }
@@ -962,6 +1049,7 @@ class _RouteDetailMapViewState extends State<RouteDetailMapView> {
         trajectory: widget.trajectory,
         selectedStop: widget.selectedStop,
         routeColor: widget.routeColor,
+        transporteId: widget.transporteId,
         mapController: widget.mapController,
         onCameraMove: widget.onCameraMove,
       );
@@ -992,6 +1080,7 @@ class _MockRouteDetailMapView extends StatefulWidget {
   final List<List<double>> trajectory;
   final RouteStop? selectedStop;
   final String? routeColor;
+  final int transporteId;
   final RouteDetailMapController mapController;
   final VoidCallback onCameraMove;
 
@@ -1000,12 +1089,14 @@ class _MockRouteDetailMapView extends StatefulWidget {
     required this.trajectory,
     required this.selectedStop,
     required this.routeColor,
+    required this.transporteId,
     required this.mapController,
     required this.onCameraMove,
   });
 
   @override
-  State<_MockRouteDetailMapView> createState() => _MockRouteDetailMapViewState();
+  State<_MockRouteDetailMapView> createState() =>
+      _MockRouteDetailMapViewState();
 }
 
 class _MockRouteDetailMapViewState extends State<_MockRouteDetailMapView> {
@@ -1065,7 +1156,10 @@ class _MockRouteDetailMapViewState extends State<_MockRouteDetailMapView> {
     final double pxPerDegree = 25000.0 * scale;
 
     final double x = centerX + (lonDiff * pxPerDegree);
-    final double y = centerY - (latDiff * pxPerDegree); // Latitud crece hacia arriba, Y crece hacia abajo
+    final double y =
+        centerY -
+        (latDiff *
+            pxPerDegree); // Latitud crece hacia arriba, Y crece hacia abajo
 
     return Offset(x, y);
   }
@@ -1091,14 +1185,20 @@ class _MockRouteDetailMapViewState extends State<_MockRouteDetailMapView> {
       onTapUp: (details) {
         final size = context.size;
         if (size == null) return;
-        
+
         // Comprobar si se hace clic en alguna parada simulada
         for (final stop in widget.stops) {
           if (stop.latitud != null && stop.longitud != null) {
-            final stopPos = _toCanvas(LatLng(stop.latitud!, stop.longitud!), size);
+            final stopPos = _toCanvas(
+              LatLng(stop.latitud!, stop.longitud!),
+              size,
+            );
             final dist = (details.localPosition - stopPos).distance;
-            if (dist < 20.0) { // 20px radio de toque
-              context.read<RouteDetailBloc>().add(RouteDetailStopSelected(stop));
+            if (dist < 20.0) {
+              // 20px radio de toque
+              context.read<RouteDetailBloc>().add(
+                RouteDetailStopSelected(stop),
+              );
               break;
             }
           }
@@ -1111,6 +1211,7 @@ class _MockRouteDetailMapViewState extends State<_MockRouteDetailMapView> {
           trajectory: widget.trajectory,
           selectedStop: widget.selectedStop,
           routeColor: widget.routeColor,
+          transporteId: widget.transporteId,
           zoom: _zoom,
           center: _center,
           toCanvas: _toCanvas,
@@ -1125,6 +1226,7 @@ class _MockRouteDetailMapPainter extends CustomPainter {
   final List<List<double>> trajectory;
   final RouteStop? selectedStop;
   final String? routeColor;
+  final int transporteId;
   final double zoom;
   final LatLng center;
   final Offset Function(LatLng, Size) toCanvas;
@@ -1134,6 +1236,7 @@ class _MockRouteDetailMapPainter extends CustomPainter {
     required this.trajectory,
     required this.selectedStop,
     required this.routeColor,
+    required this.transporteId,
     required this.zoom,
     required this.center,
     required this.toCanvas,
@@ -1151,10 +1254,10 @@ class _MockRouteDetailMapPainter extends CustomPainter {
     final gridPaint = Paint()
       ..color = const Color(0xFF282C32)
       ..strokeWidth = 1.0;
-    
+
     final double scale = pow(2.0, zoom - 13.0).toDouble();
     final double spacing = 50.0 * scale;
-    
+
     if (spacing > 10.0) {
       for (double x = 0; x < size.width; x += spacing) {
         canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
@@ -1177,7 +1280,11 @@ class _MockRouteDetailMapPainter extends CustomPainter {
     ];
 
     for (final road in roadCoords) {
-      canvas.drawLine(toCanvas(road[0], size), toCanvas(road[1], size), roadPaint);
+      canvas.drawLine(
+        toCanvas(road[0], size),
+        toCanvas(road[1], size),
+        roadPaint,
+      );
     }
 
     // 4. Dibujar Trayectoria
@@ -1194,8 +1301,10 @@ class _MockRouteDetailMapPainter extends CustomPainter {
 
     if (trajectory.isNotEmpty) {
       final path = Path();
-      path.moveTo(toCanvas(LatLng(trajectory[0][0], trajectory[0][1]), size).dx,
-                  toCanvas(LatLng(trajectory[0][0], trajectory[0][1]), size).dy);
+      path.moveTo(
+        toCanvas(LatLng(trajectory[0][0], trajectory[0][1]), size).dx,
+        toCanvas(LatLng(trajectory[0][0], trajectory[0][1]), size).dy,
+      );
       for (int i = 1; i < trajectory.length; i++) {
         final p = toCanvas(LatLng(trajectory[i][0], trajectory[i][1]), size);
         path.lineTo(p.dx, p.dy);
@@ -1203,16 +1312,29 @@ class _MockRouteDetailMapPainter extends CustomPainter {
       canvas.drawPath(path, routePaint);
     } else {
       // Si la trayectoria está vacía en la base de datos, unimos las paradas con una línea punteada
-      final validStops = stops.where((s) => s.latitud != null && s.longitud != null).toList();
+      final validStops = stops
+          .where((s) => s.latitud != null && s.longitud != null)
+          .toList();
       if (validStops.length >= 2) {
         final path = Path();
-        path.moveTo(toCanvas(LatLng(validStops[0].latitud!, validStops[0].longitud!), size).dx,
-                    toCanvas(LatLng(validStops[0].latitud!, validStops[0].longitud!), size).dy);
+        path.moveTo(
+          toCanvas(
+            LatLng(validStops[0].latitud!, validStops[0].longitud!),
+            size,
+          ).dx,
+          toCanvas(
+            LatLng(validStops[0].latitud!, validStops[0].longitud!),
+            size,
+          ).dy,
+        );
         for (int i = 1; i < validStops.length; i++) {
-          final p = toCanvas(LatLng(validStops[i].latitud!, validStops[i].longitud!), size);
+          final p = toCanvas(
+            LatLng(validStops[i].latitud!, validStops[i].longitud!),
+            size,
+          );
           path.lineTo(p.dx, p.dy);
         }
-        
+
         // Estilo punteado
         final dashPaint = Paint()
           ..color = mainColor.withOpacity(0.5)
@@ -1223,22 +1345,117 @@ class _MockRouteDetailMapPainter extends CustomPainter {
     }
 
     // 5. Dibujar Paradas
-    final stopPaint = Paint()..style = PaintingStyle.fill;
-    final strokePaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-
     for (final stop in stops) {
       if (stop.latitud != null && stop.longitud != null) {
         final pos = toCanvas(LatLng(stop.latitud!, stop.longitud!), size);
         final isSelected = selectedStop?.id == stop.id;
-
-        stopPaint.color = isSelected ? Colors.red : mainColor;
-        canvas.drawCircle(pos, isSelected ? 8.0 : 6.0, stopPaint);
-        canvas.drawCircle(pos, isSelected ? 8.0 : 6.0, strokePaint);
+        if (isSelected) {
+          canvas.drawCircle(
+            pos,
+            16,
+            Paint()..color = mainColor.withValues(alpha: 0.24),
+          );
+          canvas.drawCircle(
+            pos,
+            16,
+            Paint()
+              ..color = Colors.white
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2,
+          );
+        }
+        if (transporteId == TransportStopIcons.transporteTelefericoId) {
+          _dibujarIconoTeleferico(canvas, pos, isSelected);
+        } else {
+          _dibujarIconoPumakatari(canvas, pos, isSelected);
+        }
       }
     }
+  }
+
+  void _dibujarIconoPumakatari(
+    Canvas canvas,
+    Offset centro,
+    bool seleccionado,
+  ) {
+    final escala = seleccionado ? 1.2 : 1.0;
+    canvas.save();
+    canvas.translate(centro.dx, centro.dy);
+    canvas.scale(escala);
+    canvas.translate(-18, -18);
+
+    final gris = Paint()..color = const Color(0xFF6D6E71);
+    final rojo = Paint()..color = const Color(0xFFBE1931);
+    final placa = Paint()..color = const Color(0xFFBCBEC0);
+    final naranja = Paint()..color = const Color(0xFFF4900C);
+    canvas.drawRect(const Rect.fromLTWH(12, 8, 2, 28), gris);
+    canvas.drawCircle(const Offset(13, 5), 5, rojo);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(18, 9, 12, 17),
+        const Radius.circular(2),
+      ),
+      placa,
+    );
+    canvas.drawRect(const Rect.fromLTWH(18, 9, 12, 4), rojo);
+    canvas.drawRect(const Rect.fromLTWH(21, 15, 3, 3), gris);
+    canvas.drawRect(const Rect.fromLTWH(25, 15, 3, 3), gris);
+    canvas.drawRect(const Rect.fromLTWH(21, 20, 3, 3), naranja);
+    canvas.drawRect(const Rect.fromLTWH(25, 20, 3, 3), naranja);
+    canvas.restore();
+  }
+
+  void _dibujarIconoTeleferico(
+    Canvas canvas,
+    Offset centro,
+    bool seleccionado,
+  ) {
+    final escala = seleccionado ? 1.2 : 1.0;
+    canvas.save();
+    canvas.translate(centro.dx, centro.dy);
+    canvas.scale(escala);
+    canvas.translate(-18, -18);
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(4, 4, 28, 28),
+        const Radius.circular(3),
+      ),
+      Paint()..color = Colors.white,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(4, 4, 28, 28),
+        const Radius.circular(3),
+      ),
+      Paint()
+        ..color = Colors.black
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
+    canvas.drawLine(
+      const Offset(8, 13),
+      const Offset(30, 7),
+      Paint()
+        ..color = Colors.black
+        ..strokeWidth = 2,
+    );
+    final cabina = Path()
+      ..moveTo(14, 18)
+      ..lineTo(25, 18)
+      ..lineTo(27, 27)
+      ..lineTo(12, 27)
+      ..close();
+    canvas.drawPath(cabina, Paint()..color = Colors.black);
+    canvas.drawRect(
+      const Rect.fromLTWH(15, 20, 4, 5),
+      Paint()..color = Colors.white,
+    );
+    canvas.drawRect(
+      const Rect.fromLTWH(21, 20, 4, 5),
+      Paint()..color = Colors.white,
+    );
+    canvas.restore();
   }
 
   @override
@@ -1246,6 +1463,7 @@ class _MockRouteDetailMapPainter extends CustomPainter {
     return oldDelegate.stops != stops ||
         oldDelegate.trajectory != trajectory ||
         oldDelegate.selectedStop != selectedStop ||
+        oldDelegate.transporteId != transporteId ||
         oldDelegate.zoom != zoom ||
         oldDelegate.center != center;
   }

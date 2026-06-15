@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -17,6 +19,8 @@ import '../bloc/location_bloc.dart';
 import '../bloc/location_event.dart';
 import '../../domain/models/multimodal_route.dart';
 import '../../domain/models/transport_graph.dart';
+import 'map_pin_marker.dart';
+import 'transport_stop_icons.dart';
 
 class OfflineMapView extends StatefulWidget {
   const OfflineMapView({super.key, required this.styleString});
@@ -36,9 +40,8 @@ class _OfflineMapViewState extends State<OfflineMapView>
   static const String _transitRouteSourceId = 'transit-route-source';
   static const String _transitRouteLayerId = 'transit-route-layer';
 
+  final GlobalKey _mapStackKey = GlobalKey();
   MapLibreMapController? _controller;
-  Circle? _currentCircle;
-  Circle? _markerDot;
   Circle? _searchCircle;
   Symbol? _searchText;
 
@@ -52,6 +55,11 @@ class _OfflineMapViewState extends State<OfflineMapView>
 
   // Seguimiento local para evitar el snap-back y redundancia
   LatLng? _lastMarkerPosition;
+  Offset? _markerScreenPosition;
+  Offset _dragTouchDeltaFromAnchor = Offset.zero;
+  bool _isMarkerDragging = false;
+  bool _markerProjectionQueued = false;
+  int _markerProjectionVersion = 0;
 
   @override
   void initState() {
@@ -125,6 +133,9 @@ class _OfflineMapViewState extends State<OfflineMapView>
           lineCap: 'round',
         ),
       );
+      await TransportStopIcons.registrarEn(controller);
+      await controller.setSymbolIconAllowOverlap(true);
+      await controller.setSymbolIconIgnorePlacement(true);
       _routeLayerReady = true;
       // Si llegó una ruta antes de tener la capa lista, la aplicamos ahora.
       if (_pendingMultimodalRoute != null) {
@@ -191,29 +202,10 @@ class _OfflineMapViewState extends State<OfflineMapView>
   void _onMapCreated(MapLibreMapController controller) {
     _controller = controller;
 
-    // Escuchar el arrastre
-    _controller!.onFeatureDrag.add((
-      point,
-      current,
-      delta,
-      origin,
-      id,
-      annotation,
-      eventType,
-    ) {
-      if (eventType == DragEventType.end) {
-        if (_currentCircle != null && id == _currentCircle!.id) {
-          debugPrint('[MAP] Drag ended at $current');
-          _lastMarkerPosition = current; // Actualizar posición local
-          context.read<MapBloc>().add(MapMarkerMoved(current));
-        }
-      }
-    });
-
     // Dibujar marcador inicial si ya existe en el estado
     final state = context.read<MapBloc>().state;
     if (state is MapReady && state.markerCoordinate != null) {
-      _updateMarker(state.markerCoordinate);
+      unawaited(_updateMarker(state.markerCoordinate));
     }
 
     // Reportar posición inicial de la cámara inmediatamente
@@ -279,6 +271,11 @@ class _OfflineMapViewState extends State<OfflineMapView>
 
   void _onCameraMove(CameraPosition cameraPosition) {
     context.read<MapBloc>().add(MapCameraMoved(cameraPosition.target));
+    _scheduleMarkerProjection();
+  }
+
+  void _onCameraIdle() {
+    _scheduleMarkerProjection();
   }
 
   Future<void> _animateToLocation(LatLng location) async {
@@ -300,56 +297,125 @@ class _OfflineMapViewState extends State<OfflineMapView>
   }
 
   Future<void> _updateMarker(LatLng? markerCoordinate) async {
-    if (_controller == null) return;
+    _lastMarkerPosition = markerCoordinate;
+    _markerProjectionVersion++;
 
-    // Si la posición es la misma que la que ya tiene el círculo (o la última conocida),
-    // no hacemos nada. Esto evita el "snap-back" si el estado del Bloc
-    // todavía tiene la posición antigua o si se dispara un redraw innecesario.
-    if (_currentCircle != null && markerCoordinate == _lastMarkerPosition) {
-      debugPrint('[MAP] Skipping marker update, already at $markerCoordinate');
+    if (markerCoordinate == null) {
+      if (mounted) {
+        setState(() {
+          _markerScreenPosition = null;
+          _isMarkerDragging = false;
+        });
+      }
       return;
     }
 
-    if (_currentCircle != null) {
-      await _controller!.removeCircle(_currentCircle!);
-      _currentCircle = null;
+    debugPrint('[MAP] Posicionando tachuela en $markerCoordinate');
+    await _syncMarkerScreenPosition(markerCoordinate);
+  }
+
+  double get _mapProjectionScale {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return MediaQuery.maybeOf(context)?.devicePixelRatio ??
+          View.of(context).devicePixelRatio;
+    }
+    return 1.0;
+  }
+
+  Offset _logicalOffsetFromMapPoint(Point point) {
+    final scale = _mapProjectionScale;
+    return Offset(point.x.toDouble() / scale, point.y.toDouble() / scale);
+  }
+
+  Point<double> _mapPointFromLogicalOffset(Offset offset) {
+    final scale = _mapProjectionScale;
+    return Point<double>(offset.dx * scale, offset.dy * scale);
+  }
+
+  Future<void> _syncMarkerScreenPosition([LatLng? coordinate]) async {
+    final controller = _controller;
+    final markerCoordinate = coordinate ?? _lastMarkerPosition;
+    if (controller == null || markerCoordinate == null || _isMarkerDragging) {
+      return;
     }
 
-    if (_markerDot != null) {
-      await _controller!.removeCircle(_markerDot!);
-      _markerDot = null;
+    final version = ++_markerProjectionVersion;
+    try {
+      final point = await controller.toScreenLocation(markerCoordinate);
+      if (!mounted ||
+          version != _markerProjectionVersion ||
+          _isMarkerDragging) {
+        return;
+      }
+      setState(() {
+        _markerScreenPosition = _logicalOffsetFromMapPoint(point);
+      });
+    } catch (e) {
+      debugPrint('[MAP] No se pudo proyectar la tachuela: $e');
+    }
+  }
+
+  void _scheduleMarkerProjection() {
+    if (_isMarkerDragging || _markerProjectionQueued) return;
+
+    _markerProjectionQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _markerProjectionQueued = false;
+      if (!mounted) return;
+      unawaited(_syncMarkerScreenPosition());
+    });
+  }
+
+  void _onMarkerDragStart(DragStartDetails details) {
+    if (_markerScreenPosition == null) return;
+
+    _markerProjectionVersion++;
+    _dragTouchDeltaFromAnchor =
+        details.localPosition - MapPinMarker.puntoAnclaje;
+    setState(() => _isMarkerDragging = true);
+  }
+
+  void _onMarkerDragUpdate(DragUpdateDetails details) {
+    final renderObject = _mapStackKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox) return;
+
+    final localPosition = renderObject.globalToLocal(details.globalPosition);
+    setState(() {
+      _markerScreenPosition = localPosition - _dragTouchDeltaFromAnchor;
+    });
+  }
+
+  void _onMarkerDragEnd(DragEndDetails details) {
+    unawaited(_finishMarkerDrag());
+  }
+
+  void _onMarkerDragCancel() {
+    setState(() => _isMarkerDragging = false);
+    unawaited(_syncMarkerScreenPosition());
+  }
+
+  Future<void> _finishMarkerDrag() async {
+    final controller = _controller;
+    final screenPosition = _markerScreenPosition;
+    if (controller == null || screenPosition == null) {
+      if (mounted) setState(() => _isMarkerDragging = false);
+      return;
     }
 
-    if (markerCoordinate != null) {
-      debugPrint(
-        '[MAP] Drawing new red marker with black dot at $markerCoordinate',
+    try {
+      final coordinate = await controller.toLatLng(
+        _mapPointFromLogicalOffset(screenPosition),
       );
-      _lastMarkerPosition = markerCoordinate;
-
-      // Primero dibujamos el marcador rojo (área de toque)
-      _currentCircle = await _controller!.addCircle(
-        CircleOptions(
-          geometry: markerCoordinate,
-          circleRadius: 22.0, // Área de toque más grande
-          circleColor: '#FF0000', // Rojo
-          circleOpacity: 0.6, // Semi-transparente para que no tape tanto
-          circleStrokeWidth: 2.0,
-          circleStrokeColor: '#FFFFFF',
-          draggable: true,
-        ),
-      );
-
-      // Luego dibujamos el punto negro exacto en la coordenada
-      _markerDot = await _controller!.addCircle(
-        CircleOptions(
-          geometry: markerCoordinate,
-          circleRadius: 3.0, // Punto pequeño y preciso
-          circleColor: '#000000', // Negro
-          circleOpacity: 1.0,
-          draggable:
-              false, // El punto no se arrastra solo, se arrastra con el rojo
-        ),
-      );
+      _lastMarkerPosition = coordinate;
+      if (!mounted) return;
+      setState(() => _isMarkerDragging = false);
+      debugPrint('[MAP] Tachuela soltada en $coordinate');
+      context.read<MapBloc>().add(MapMarkerMoved(coordinate));
+      unawaited(_syncMarkerScreenPosition(coordinate));
+    } catch (e) {
+      debugPrint('[MAP] No se pudo convertir la tachuela a coordenadas: $e');
+      if (mounted) setState(() => _isMarkerDragging = false);
+      unawaited(_syncMarkerScreenPosition());
     }
   }
 
@@ -417,32 +483,17 @@ class _OfflineMapViewState extends State<OfflineMapView>
       final latitud = parada.latitud;
       final longitud = parada.longitud;
       if (latitud == null || longitud == null) continue;
-      final esTeleferico = parada.transporteId == 2;
-      final color = esTeleferico ? '#E2231A' : '#1F8A4C';
-      final texto = esTeleferico ? 'T' : 'B';
       final punto = LatLng(latitud, longitud);
 
-      _routeStopCircles.add(
-        await controller.addCircle(
-          CircleOptions(
-            geometry: punto,
-            circleRadius: 9,
-            circleColor: color,
-            circleOpacity: 0.95,
-            circleStrokeWidth: 2,
-            circleStrokeColor: '#FFFFFF',
-          ),
-        ),
-      );
       _routeStopSymbols.add(
         await controller.addSymbol(
           SymbolOptions(
             geometry: punto,
-            textField: texto,
-            textSize: 11,
-            textColor: '#FFFFFF',
-            textHaloColor: color,
-            textHaloWidth: 0.5,
+            iconImage: TransportStopIcons.imagenParaTransporte(
+              parada.transporteId,
+            ),
+            iconSize: parada.transporteId == 2 ? 0.34 : 0.38,
+            iconAnchor: 'center',
           ),
         ),
       );
@@ -462,6 +513,8 @@ class _OfflineMapViewState extends State<OfflineMapView>
               } else {
                 _drawFallbackRoute(state.coordinates);
               }
+            } else if (state is RoutingSearching) {
+              _drawFallbackRoute(const []);
             } else if (state is RoutingOptionsFound) {
               _drawFallbackRoute(const []);
             } else if (state is RoutingError) {
@@ -522,22 +575,48 @@ class _OfflineMapViewState extends State<OfflineMapView>
           },
         ),
       ],
-      child: MapLibreMap(
-        initialCameraPosition: const CameraPosition(
-          target: LatLng(MapConfig.initialLatitude, MapConfig.initialLongitude),
-          zoom: MapConfig.initialZoom,
-        ),
-        styleString: widget.styleString,
-        minMaxZoomPreference: const MinMaxZoomPreference(
-          null,
-          MapConfig.maxZoom,
-        ),
-        onMapCreated: _onMapCreated,
-        onStyleLoadedCallback: _onStyleLoaded,
-        onMapClick: _onMapClick,
-        onCameraMove: _onCameraMove,
-        myLocationEnabled: true,
-        trackCameraPosition: true,
+      child: Stack(
+        key: _mapStackKey,
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(
+            child: MapLibreMap(
+              initialCameraPosition: const CameraPosition(
+                target: LatLng(
+                  MapConfig.initialLatitude,
+                  MapConfig.initialLongitude,
+                ),
+                zoom: MapConfig.initialZoom,
+              ),
+              styleString: widget.styleString,
+              minMaxZoomPreference: const MinMaxZoomPreference(
+                null,
+                MapConfig.maxZoom,
+              ),
+              onMapCreated: _onMapCreated,
+              onStyleLoadedCallback: _onStyleLoaded,
+              onMapClick: _onMapClick,
+              onCameraMove: _onCameraMove,
+              onCameraIdle: _onCameraIdle,
+              myLocationEnabled: true,
+              trackCameraPosition: true,
+            ),
+          ),
+          if (_markerScreenPosition != null)
+            Positioned(
+              left: _markerScreenPosition!.dx - MapPinMarker.puntoAnclaje.dx,
+              top: _markerScreenPosition!.dy - MapPinMarker.puntoAnclaje.dy,
+              width: MapPinMarker.tamano.width,
+              height: MapPinMarker.tamano.height,
+              child: MapPinMarker(
+                levantado: _isMarkerDragging,
+                onPanStart: _onMarkerDragStart,
+                onPanUpdate: _onMarkerDragUpdate,
+                onPanEnd: _onMarkerDragEnd,
+                onPanCancel: _onMarkerDragCancel,
+              ),
+            ),
+        ],
       ),
     );
   }

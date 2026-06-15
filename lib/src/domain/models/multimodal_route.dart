@@ -81,3 +81,27 @@ class ResultadoRutaMultimodal extends Equatable {
     distanciaTotalMetros,
   ];
 }
+
+class OpcionesRutaAgrupadas extends Equatable {
+  final List<ResultadoRutaMultimodal> soloPumakatari;
+  final List<ResultadoRutaMultimodal> soloTeleferico;
+  final List<ResultadoRutaMultimodal> multimodal;
+
+  const OpcionesRutaAgrupadas({
+    this.soloPumakatari = const [],
+    this.soloTeleferico = const [],
+    this.multimodal = const [],
+  });
+
+  List<ResultadoRutaMultimodal> get todas => [
+    ...soloPumakatari,
+    ...soloTeleferico,
+    ...multimodal,
+  ];
+
+  bool get isEmpty =>
+      soloPumakatari.isEmpty && soloTeleferico.isEmpty && multimodal.isEmpty;
+
+  @override
+  List<Object?> get props => [soloPumakatari, soloTeleferico, multimodal];
+}

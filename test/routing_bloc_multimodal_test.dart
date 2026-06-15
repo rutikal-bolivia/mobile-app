@@ -89,7 +89,7 @@ void main() {
 
       final options = await _esperarEstado<RoutingOptionsFound>(bloc);
 
-      expect(options.opciones, [resultado]);
+      expect(options.opciones, contains(resultado));
       expect(fallbackLlamado, isFalse);
 
       bloc.add(SelectRouteOptionRequested(options.opciones.first));

@@ -11,11 +11,15 @@ class MultimodalRoutingConfig extends Equatable {
   final double radioMaximoCaminataMetros;
   final int maximoCandidatasPorExtremo;
   final int maximoOpciones;
+  final int transportePumakatariId;
+  final int transporteTelefericoId;
 
   const MultimodalRoutingConfig({
     this.radioMaximoCaminataMetros = 800,
     this.maximoCandidatasPorExtremo = 8,
-    this.maximoOpciones = 4,
+    this.maximoOpciones = 5,
+    this.transportePumakatariId = 1,
+    this.transporteTelefericoId = 2,
   });
 
   @override
@@ -23,6 +27,8 @@ class MultimodalRoutingConfig extends Equatable {
     radioMaximoCaminataMetros,
     maximoCandidatasPorExtremo,
     maximoOpciones,
+    transportePumakatariId,
+    transporteTelefericoId,
   ];
 }
 
@@ -56,6 +62,48 @@ class MultimodalRoutingEngine {
   }) async {
     final opciones = await calcularOpciones(grafo: grafo, solicitud: solicitud);
     return opciones.isEmpty ? null : opciones.first;
+  }
+
+  Future<OpcionesRutaAgrupadas> calcularOpcionesAgrupadas({
+    required GrafoTransporte grafo,
+    required SolicitudRutaMultimodal solicitud,
+  }) async {
+    final soloPumakatari = await calcularOpciones(
+      grafo: grafo,
+      solicitud: SolicitudRutaMultimodal(
+        origen: solicitud.origen,
+        destino: solicitud.destino,
+        transportesPermitidos: {config.transportePumakatariId},
+      ),
+    );
+    final soloTeleferico = await calcularOpciones(
+      grafo: grafo,
+      solicitud: SolicitudRutaMultimodal(
+        origen: solicitud.origen,
+        destino: solicitud.destino,
+        transportesPermitidos: {config.transporteTelefericoId},
+      ),
+    );
+    final combinadas = await calcularOpciones(
+      grafo: grafo,
+      solicitud: SolicitudRutaMultimodal(
+        origen: solicitud.origen,
+        destino: solicitud.destino,
+        transportesPermitidos: {
+          config.transportePumakatariId,
+          config.transporteTelefericoId,
+        },
+      ),
+    );
+
+    return OpcionesRutaAgrupadas(
+      soloPumakatari: soloPumakatari.take(config.maximoOpciones).toList(),
+      soloTeleferico: soloTeleferico.take(config.maximoOpciones).toList(),
+      multimodal: combinadas
+          .where(_usaPumakatariYTeleferico)
+          .take(config.maximoOpciones)
+          .toList(),
+    );
   }
 
   Future<List<ResultadoRutaMultimodal>> calcularOpciones({
@@ -442,5 +490,15 @@ class MultimodalRoutingEngine {
         .where((a) => a.tipo != TipoAristaGrafo.caminata)
         .map((a) => '${a.tipo.name}:${a.origen.clave}:${a.destino.clave}')
         .join('|');
+  }
+
+  bool _usaPumakatariYTeleferico(ResultadoRutaMultimodal resultado) {
+    final transportes = resultado.segmentos
+        .where((s) => s.tipo == TipoSegmentoRuta.viaje)
+        .map((s) => s.transporteId)
+        .whereType<int>()
+        .toSet();
+    return transportes.contains(config.transportePumakatariId) &&
+        transportes.contains(config.transporteTelefericoId);
   }
 }

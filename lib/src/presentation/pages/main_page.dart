@@ -48,136 +48,162 @@ class MainPage extends StatelessWidget {
   }
 }
 
-class _MainPageContent extends StatelessWidget {
+class _MainPageContent extends StatefulWidget {
   const _MainPageContent();
 
   @override
+  State<_MainPageContent> createState() => _MainPageContentState();
+}
+
+class _MainPageContentState extends State<_MainPageContent> {
+  bool _centroInicialAplicado = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _centrarCamaraEnUsuarioSiListo();
+    });
+  }
+
+  void _centrarCamaraEnUsuarioSiListo() {
+    if (_centroInicialAplicado) return;
+
+    final locationState = context.read<LocationBloc>().state;
+    final mapState = context.read<MapBloc>().state;
+    if (locationState is! LocationSuccess || mapState is! MapReady) return;
+
+    final pos = locationState.position;
+    _centroInicialAplicado = true;
+    context.read<MapBloc>().add(
+      MapMoveCameraRequested(LatLng(pos.latitude, pos.longitude)),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return BlocListener<RoutingBloc, RoutingState>(
-      listener: (context, state) {
-        if (state is RoutingOptionsFound && state.opciones.isNotEmpty) {
-          _mostrarOpcionesRuta(context, state.opciones);
-        }
-      },
-      child: Stack(
+    return MultiBlocListener(
+      listeners: [
+        BlocListener<LocationBloc, LocationState>(
+          listener: (context, state) => _centrarCamaraEnUsuarioSiListo(),
+        ),
+        BlocListener<MapBloc, MapState>(
+          listenWhen: (previous, current) => current is MapReady,
+          listener: (context, state) => _centrarCamaraEnUsuarioSiListo(),
+        ),
+      ],
+      child: BlocBuilder<RoutingBloc, RoutingState>(
+        builder: (context, routingState) {
+          final mostrandoOpciones = routingState is RoutingOptionsFound;
+          final buscando = routingState is RoutingSearching;
+          final mostrandoRuta =
+              routingState is RoutingSuccess &&
+              routingState.resultadoMultimodal != null;
+          final ocultarControles =
+              buscando || mostrandoOpciones || mostrandoRuta;
+
+          return Stack(
+            children: [
+              if (!ocultarControles) const _MapSearchControls(),
+              if (!ocultarControles) const _MapFloatingControls(),
+              if (!ocultarControles) const _CalculateRouteButton(),
+              if (buscando) const Positioned.fill(child: _SearchingOverlay()),
+              if (mostrandoOpciones)
+                Positioned.fill(
+                  child: _RouteOptionsPage(
+                    opciones: routingState.opcionesAgrupadas,
+                    onSelected: (resultado) {
+                      context.read<RoutingBloc>().add(
+                        SelectRouteOptionRequested(resultado),
+                      );
+                    },
+                  ),
+                ),
+              if (mostrandoRuta) const _RouteBackButton(),
+              if (mostrandoRuta)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 16,
+                  child: _RouteSummaryCard(
+                    resultado: routingState.resultadoMultimodal!,
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MapSearchControls extends StatelessWidget {
+  const _MapSearchControls();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 50,
+      left: 15,
+      right: 15,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Área superior: Buscador y Botón de Marcador
-          Positioned(
-            top: 50,
-            left: 15,
-            right: 15,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Expanded(child: SearchBarWidget()),
-                const SizedBox(width: 10),
-                AddMarkerButton(
-                  onPressed: () {
-                    context.read<MapBloc>().add(
-                      const MapAddMarkerAtCenterRequested(),
-                    );
-                  },
-                ),
-              ],
-            ),
+          const Expanded(child: SearchBarWidget()),
+          const SizedBox(width: 10),
+          AddMarkerButton(
+            onPressed: () {
+              context.read<MapBloc>().add(
+                const MapAddMarkerAtCenterRequested(),
+              );
+            },
           ),
+        ],
+      ),
+    );
+  }
+}
 
-          // Botones de control (Zoom + Ubicación)
-          Positioned(
-            bottom: 100,
-            right: 15,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ZoomInButton(
-                  onPressed: () =>
-                      context.read<MapBloc>().add(const MapZoomInRequested()),
-                ),
-                const SizedBox(height: 10),
-                ZoomOutButton(
-                  onPressed: () =>
-                      context.read<MapBloc>().add(const MapZoomOutRequested()),
-                ),
-                const SizedBox(height: 20),
-                BlocListener<LocationBloc, LocationState>(
-                  listener: (context, state) {
-                    if (state is LocationFailure) {
-                      ScaffoldMessenger.of(
-                        context,
-                      ).showSnackBar(SnackBar(content: Text(state.message)));
-                    }
-                  },
-                  child: MyLocationButton(
-                    onPressed: () {
-                      final locationState = context.read<LocationBloc>().state;
-                      if (locationState is LocationSuccess) {
-                        final pos = locationState.position;
-                        context.read<MapBloc>().add(
-                          MapMoveCameraRequested(
-                            LatLng(pos.latitude, pos.longitude),
-                          ),
-                        );
-                      } else {
-                        context.read<LocationBloc>().add(LocationRequested());
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
+class _MapFloatingControls extends StatelessWidget {
+  const _MapFloatingControls();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      bottom: 100,
+      right: 15,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ZoomInButton(
+            onPressed: () =>
+                context.read<MapBloc>().add(const MapZoomInRequested()),
           ),
-
-          // Área inferior: Botón de Routing (Solo si hay marcador)
-          Positioned(
-            bottom: 30,
-            left: 0,
-            right: 0,
-            child: BlocBuilder<MapBloc, MapState>(
-              builder: (context, state) {
-                if (state is! MapReady || state.markerCoordinate == null) {
-                  return const SizedBox.shrink();
+          const SizedBox(height: 10),
+          ZoomOutButton(
+            onPressed: () =>
+                context.read<MapBloc>().add(const MapZoomOutRequested()),
+          ),
+          const SizedBox(height: 20),
+          BlocListener<LocationBloc, LocationState>(
+            listener: (context, state) {
+              if (state is LocationFailure) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text(state.message)));
+              }
+            },
+            child: MyLocationButton(
+              onPressed: () {
+                final locationState = context.read<LocationBloc>().state;
+                if (locationState is LocationSuccess) {
+                  final pos = locationState.position;
+                  context.read<MapBloc>().add(
+                    MapMoveCameraRequested(LatLng(pos.latitude, pos.longitude)),
+                  );
+                } else {
+                  context.read<LocationBloc>().add(LocationRequested());
                 }
-
-                return Center(
-                  child: RoutingButton(
-                    onPressed: () {
-                      final locationState = context.read<LocationBloc>().state;
-                      final mapState = state;
-
-                      if (locationState is LocationSuccess) {
-                        final pos = locationState.position;
-                        context.read<RoutingBloc>().add(
-                          CalculateRouteRequested(
-                            origin: LatLng(pos.latitude, pos.longitude),
-                            destination: mapState.markerCoordinate!,
-                          ),
-                        );
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Ubicación de usuario no disponible'),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                );
-              },
-            ),
-          ),
-
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 96,
-            child: BlocBuilder<RoutingBloc, RoutingState>(
-              builder: (context, state) {
-                if (state is! RoutingSuccess ||
-                    state.resultadoMultimodal == null) {
-                  return const SizedBox.shrink();
-                }
-
-                return _RouteSummaryCard(resultado: state.resultadoMultimodal!);
               },
             ),
           ),
@@ -185,25 +211,127 @@ class _MainPageContent extends StatelessWidget {
       ),
     );
   }
+}
 
-  Future<void> _mostrarOpcionesRuta(
-    BuildContext context,
-    List<ResultadoRutaMultimodal> opciones,
-  ) async {
-    final routingBloc = context.read<RoutingBloc>();
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return _RouteOptionsSheet(
-          opciones: opciones,
-          onSelected: (resultado) {
-            routingBloc.add(SelectRouteOptionRequested(resultado));
-            Navigator.of(sheetContext).pop();
-          },
-        );
-      },
+class _CalculateRouteButton extends StatelessWidget {
+  const _CalculateRouteButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      bottom: 30,
+      left: 0,
+      right: 0,
+      child: BlocBuilder<MapBloc, MapState>(
+        builder: (context, state) {
+          if (state is! MapReady || state.markerCoordinate == null) {
+            return const SizedBox.shrink();
+          }
+
+          return Center(
+            child: RoutingButton(
+              onPressed: () {
+                final locationState = context.read<LocationBloc>().state;
+                if (locationState is LocationSuccess) {
+                  final pos = locationState.position;
+                  context.read<RoutingBloc>().add(
+                    CalculateRouteRequested(
+                      origin: LatLng(pos.latitude, pos.longitude),
+                      destination: state.markerCoordinate!,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Ubicación de usuario no disponible'),
+                    ),
+                  );
+                }
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RouteBackButton extends StatelessWidget {
+  const _RouteBackButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 50,
+      left: 16,
+      child: SafeArea(
+        bottom: false,
+        child: Material(
+          color: Colors.white,
+          shape: const CircleBorder(),
+          elevation: 5,
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            color: const Color(0xFF111827),
+            onPressed: () {
+              context.read<RoutingBloc>().add(ReturnToRouteOptionsRequested());
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchingOverlay extends StatelessWidget {
+  const _SearchingOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black26,
+      child: Center(
+        child: Material(
+          color: Colors.white,
+          elevation: 10,
+          borderRadius: BorderRadius.circular(14),
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 34,
+                  height: 34,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: Color(0xFF1F8A4C),
+                  ),
+                ),
+                SizedBox(height: 14),
+                Text(
+                  'Buscando rutas',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Calculando caminatas, esperas y transbordos',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -275,6 +403,7 @@ class _RouteSummaryCardState extends State<_RouteSummaryCard> {
                     icon: Icons.directions_walk,
                     label: 'Inicio',
                     value: _formatearTiempo(stats.caminataInicial),
+                    detail: _formatearDistancia(stats.caminataInicialMetros),
                   ),
                   _TiempoItem(
                     icon: Icons.directions_bus,
@@ -282,11 +411,13 @@ class _RouteSummaryCardState extends State<_RouteSummaryCard> {
                         ? 'Transporte · 1 cambio'
                         : 'Transporte · ${stats.transbordos} cambios',
                     value: _formatearTiempo(stats.transporte),
+                    detail: _formatearDistancia(stats.transporteMetros),
                   ),
                   _TiempoItem(
                     icon: Icons.flag,
                     label: 'Final',
                     value: _formatearTiempo(stats.caminataFinal),
+                    detail: _formatearDistancia(stats.caminataFinalMetros),
                   ),
                 ],
               ),
@@ -316,81 +447,161 @@ class _RouteSummaryCardState extends State<_RouteSummaryCard> {
   }
 }
 
-class _RouteOptionsSheet extends StatelessWidget {
-  const _RouteOptionsSheet({required this.opciones, required this.onSelected});
+class _RouteOptionsPage extends StatelessWidget {
+  const _RouteOptionsPage({required this.opciones, required this.onSelected});
 
+  final OpcionesRutaAgrupadas opciones;
+  final ValueChanged<ResultadoRutaMultimodal> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Rutas encontradas',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Elige una opción para verla en el mapa',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF64748B),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.only(bottom: 18),
+                  children: [
+                    _RouteOptionsGroup(
+                      title: 'Solo Pumakatari',
+                      subtitle: 'Puede incluir cambios entre buses',
+                      icon: Icons.directions_bus,
+                      color: const Color(0xFF1F8A4C),
+                      opciones: opciones.soloPumakatari,
+                      onSelected: onSelected,
+                    ),
+                    const SizedBox(height: 18),
+                    _RouteOptionsGroup(
+                      title: 'Solo Teleférico',
+                      subtitle: 'Sin espera operacional por abordaje',
+                      icon: Icons.tram,
+                      color: const Color(0xFFE2231A),
+                      opciones: opciones.soloTeleferico,
+                      onSelected: onSelected,
+                    ),
+                    const SizedBox(height: 18),
+                    _RouteOptionsGroup(
+                      title: 'Pumakatari + Teleférico',
+                      subtitle: 'Incluye transbordos entre sistemas',
+                      icon: Icons.transfer_within_a_station,
+                      color: const Color(0xFFF3C03F),
+                      opciones: opciones.multimodal,
+                      onSelected: onSelected,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RouteOptionsGroup extends StatelessWidget {
+  const _RouteOptionsGroup({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    required this.opciones,
+    required this.onSelected,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
   final List<ResultadoRutaMultimodal> opciones;
   final ValueChanged<ResultadoRutaMultimodal> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.72;
-    return SafeArea(
-      top: false,
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          child: Material(
-            color: Colors.white,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-            clipBehavior: Clip.antiAlias,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 42,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFCBD5E1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Rutas encontradas',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF111827),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Ordenadas por menor tiempo total',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF64748B),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Flexible(
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      padding: EdgeInsets.zero,
-                      itemCount: opciones.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        return _RouteOptionTile(
-                          resultado: opciones[index],
-                          index: index,
-                          onTap: () => onSelected(opciones[index]),
-                        );
-                      },
-                    ),
-                  ),
-                ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$title (${opciones.length})',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF111827),
+                ),
               ),
             ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF64748B),
           ),
         ),
-      ),
+        const SizedBox(height: 10),
+        if (opciones.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: const Text(
+              'Sin opciones para este modo',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF64748B),
+              ),
+            ),
+          )
+        else
+          ...List.generate(opciones.length, (index) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: index == opciones.length - 1 ? 0 : 10,
+              ),
+              child: _RouteOptionTile(
+                resultado: opciones[index],
+                index: index,
+                onTap: () => onSelected(opciones[index]),
+              ),
+            );
+          }),
+      ],
     );
   }
 }
@@ -461,7 +672,9 @@ class _RouteOptionTile extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     'Caminar ${_formatearTiempo(stats.caminataInicial + stats.caminataFinal)} · '
-                    'Viajar ${_formatearTiempo(stats.transporte)}',
+                    '${_formatearDistancia(stats.caminataMetros)} · '
+                    'Viajar ${_formatearTiempo(stats.transporte)} · '
+                    '${_formatearDistancia(stats.transporteMetros)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -556,12 +769,20 @@ class _RouteStats {
     required this.caminataFinal,
     required this.transporte,
     required this.transbordos,
+    required this.caminataInicialMetros,
+    required this.caminataFinalMetros,
+    required this.caminataMetros,
+    required this.transporteMetros,
   });
 
   final int caminataInicial;
   final int caminataFinal;
   final int transporte;
   final int transbordos;
+  final double caminataInicialMetros;
+  final double caminataFinalMetros;
+  final double caminataMetros;
+  final double transporteMetros;
 }
 
 _RouteStats _calcularStats(ResultadoRutaMultimodal resultado) {
@@ -574,17 +795,37 @@ _RouteStats _calcularStats(ResultadoRutaMultimodal resultado) {
   final caminataFinal = caminatas.length > 1
       ? caminatas.last.tiempoSegundos
       : 0;
+  final caminataInicialMetros = caminatas.isNotEmpty
+      ? caminatas.first.distanciaMetros ?? 0
+      : 0.0;
+  final caminataFinalMetros = caminatas.length > 1
+      ? caminatas.last.distanciaMetros ?? 0
+      : 0.0;
   final transporte =
       resultado.tiempoTotalSegundos - caminataInicial - caminataFinal;
   final transbordos = resultado.segmentos
       .where((s) => s.tipo == TipoSegmentoRuta.transbordo)
       .length;
+  final caminataMetros = resultado.segmentos
+      .where(
+        (s) =>
+            s.tipo == TipoSegmentoRuta.caminata ||
+            s.tipo == TipoSegmentoRuta.transbordo,
+      )
+      .fold<double>(0, (total, s) => total + (s.distanciaMetros ?? 0));
+  final transporteMetros = resultado.segmentos
+      .where((s) => s.tipo == TipoSegmentoRuta.viaje)
+      .fold<double>(0, (total, s) => total + (s.distanciaMetros ?? 0));
 
   return _RouteStats(
     caminataInicial: caminataInicial,
     caminataFinal: caminataFinal,
     transporte: transporte < 0 ? 0 : transporte,
     transbordos: transbordos,
+    caminataInicialMetros: caminataInicialMetros,
+    caminataFinalMetros: caminataFinalMetros,
+    caminataMetros: caminataMetros,
+    transporteMetros: transporteMetros,
   );
 }
 
@@ -595,6 +836,11 @@ String _formatearTiempo(int segundos) {
   final resto = minutos % 60;
   if (resto == 0) return '${horas}h';
   return '${horas}h ${resto}m';
+}
+
+String _formatearDistancia(double metros) {
+  if (metros < 1000) return '${metros.round()} m';
+  return '${(metros / 1000).toStringAsFixed(1)} km';
 }
 
 String _nombreNodo(NodoGrafo nodo) {
@@ -661,11 +907,13 @@ class _TiempoItem extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    required this.detail,
   });
 
   final IconData icon;
   final String label;
   final String value;
+  final String detail;
 
   @override
   Widget build(BuildContext context) {
@@ -689,7 +937,7 @@ class _TiempoItem extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  label,
+                  '$label · $detail',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(

@@ -9,6 +9,11 @@ class GraphBuildConfig extends Equatable {
   final double velocidadBusFallbackMetrosPorSegundo;
   final double velocidadTelefericoFallbackMetrosPorSegundo;
   final double velocidadFallbackMetrosPorSegundo;
+  final int transportePumakatariId;
+  final int transporteTelefericoId;
+  final int esperaMinimaPumakatariSegundos;
+  final int esperaMaximaPumakatariSegundos;
+  final int penalizacionTransbordoSegundos;
 
   const GraphBuildConfig({
     this.penalizacionAbordajeSegundos = 0,
@@ -18,6 +23,11 @@ class GraphBuildConfig extends Equatable {
     this.velocidadBusFallbackMetrosPorSegundo = 5.0,
     this.velocidadTelefericoFallbackMetrosPorSegundo = 7.0,
     this.velocidadFallbackMetrosPorSegundo = 5.0,
+    this.transportePumakatariId = 1,
+    this.transporteTelefericoId = 2,
+    this.esperaMinimaPumakatariSegundos = 5 * 60,
+    this.esperaMaximaPumakatariSegundos = 20 * 60,
+    this.penalizacionTransbordoSegundos = 10 * 60,
   });
 
   @override
@@ -29,6 +39,11 @@ class GraphBuildConfig extends Equatable {
     velocidadBusFallbackMetrosPorSegundo,
     velocidadTelefericoFallbackMetrosPorSegundo,
     velocidadFallbackMetrosPorSegundo,
+    transportePumakatariId,
+    transporteTelefericoId,
+    esperaMinimaPumakatariSegundos,
+    esperaMaximaPumakatariSegundos,
+    penalizacionTransbordoSegundos,
   ];
 }
 

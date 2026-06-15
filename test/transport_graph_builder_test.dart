@@ -112,10 +112,12 @@ void main() {
 
       expect(mismaParada.transbordoId, 1);
       expect(mismaParada.tipoTransbordo, 'misma_parada');
-      expect(mismaParada.pesoSegundos, 120);
+      // tiempo tabla + 10 min de transbordo + espera media de la ruta Puma destino.
+      expect(mismaParada.pesoSegundos, 120 + 600 + 600);
       expect(proximidad.transbordoId, 2);
       expect(proximidad.tipoTransbordo, 'proximidad');
-      expect(proximidad.pesoSegundos, 240);
+      // El destino es Teleférico: no se suma espera de vehículo.
+      expect(proximidad.pesoSegundos, 240 + 600);
       expect(
         _buscarArista(
           grafo,
