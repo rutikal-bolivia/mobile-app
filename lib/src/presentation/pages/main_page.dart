@@ -17,14 +17,12 @@ import '../widgets/map_buttons.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import '../bloc/routing_bloc.dart';
 import '../bloc/routing_event.dart';
+import '../bloc/routing_state.dart';
 import 'map_layout.dart';
+import '../../domain/models/multimodal_route.dart';
 
 class MainPage extends StatelessWidget {
-  const MainPage({
-    super.key,
-    this.searchRepository,
-    this.locationRepository,
-  });
+  const MainPage({super.key, this.searchRepository, this.locationRepository});
 
   final SearchRepository? searchRepository;
   final LocationRepository? locationRepository;
@@ -64,13 +62,13 @@ class _MainPageContent extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Expanded(
-                child: SearchBarWidget(),
-              ),
+              const Expanded(child: SearchBarWidget()),
               const SizedBox(width: 10),
               AddMarkerButton(
                 onPressed: () {
-                  context.read<MapBloc>().add(const MapAddMarkerAtCenterRequested());
+                  context.read<MapBloc>().add(
+                    const MapAddMarkerAtCenterRequested(),
+                  );
                 },
               ),
             ],
@@ -85,19 +83,21 @@ class _MainPageContent extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               ZoomInButton(
-                onPressed: () => context.read<MapBloc>().add(const MapZoomInRequested()),
+                onPressed: () =>
+                    context.read<MapBloc>().add(const MapZoomInRequested()),
               ),
               const SizedBox(height: 10),
               ZoomOutButton(
-                onPressed: () => context.read<MapBloc>().add(const MapZoomOutRequested()),
+                onPressed: () =>
+                    context.read<MapBloc>().add(const MapZoomOutRequested()),
               ),
               const SizedBox(height: 20),
               BlocListener<LocationBloc, LocationState>(
                 listener: (context, state) {
                   if (state is LocationFailure) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(state.message)),
-                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text(state.message)));
                   }
                 },
                 child: MyLocationButton(
@@ -106,8 +106,10 @@ class _MainPageContent extends StatelessWidget {
                     if (locationState is LocationSuccess) {
                       final pos = locationState.position;
                       context.read<MapBloc>().add(
-                            MapMoveCameraRequested(LatLng(pos.latitude, pos.longitude)),
-                          );
+                        MapMoveCameraRequested(
+                          LatLng(pos.latitude, pos.longitude),
+                        ),
+                      );
                     } else {
                       context.read<LocationBloc>().add(LocationRequested());
                     }
@@ -133,19 +135,21 @@ class _MainPageContent extends StatelessWidget {
                 child: RoutingButton(
                   onPressed: () {
                     final locationState = context.read<LocationBloc>().state;
-                    final mapState = state; 
+                    final mapState = state;
 
                     if (locationState is LocationSuccess) {
                       final pos = locationState.position;
                       context.read<RoutingBloc>().add(
-                            CalculateRouteRequested(
-                              origin: LatLng(pos.latitude, pos.longitude),
-                              destination: mapState.markerCoordinate!,
-                            ),
-                          );
+                        CalculateRouteRequested(
+                          origin: LatLng(pos.latitude, pos.longitude),
+                          destination: mapState.markerCoordinate!,
+                        ),
+                      );
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Ubicación de usuario no disponible')),
+                        const SnackBar(
+                          content: Text('Ubicación de usuario no disponible'),
+                        ),
                       );
                     }
                   },
@@ -154,7 +158,162 @@ class _MainPageContent extends StatelessWidget {
             },
           ),
         ),
+
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 96,
+          child: BlocBuilder<RoutingBloc, RoutingState>(
+            builder: (context, state) {
+              if (state is! RoutingSuccess ||
+                  state.resultadoMultimodal == null) {
+                return const SizedBox.shrink();
+              }
+
+              return _RouteSummaryCard(resultado: state.resultadoMultimodal!);
+            },
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _RouteSummaryCard extends StatelessWidget {
+  const _RouteSummaryCard({required this.resultado});
+
+  final ResultadoRutaMultimodal resultado;
+
+  @override
+  Widget build(BuildContext context) {
+    final caminatas = resultado.segmentos
+        .where((s) => s.tipo == TipoSegmentoRuta.caminata)
+        .toList(growable: false);
+    final caminataInicial = caminatas.isNotEmpty
+        ? caminatas.first.tiempoSegundos
+        : 0;
+    final caminataFinal = caminatas.length > 1
+        ? caminatas.last.tiempoSegundos
+        : 0;
+    final transporte =
+        resultado.tiempoTotalSegundos - caminataInicial - caminataFinal;
+    final transbordos = resultado.segmentos
+        .where((s) => s.tipo == TipoSegmentoRuta.transbordo)
+        .length;
+
+    return Material(
+      elevation: 8,
+      borderRadius: BorderRadius.circular(12),
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.route, size: 20, color: Color(0xFF1F8A4C)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Ruta multimodal • ${_formatearTiempo(resultado.tiempoTotalSegundos)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _TiempoItem(
+                  icon: Icons.directions_walk,
+                  label: 'Inicio',
+                  value: _formatearTiempo(caminataInicial),
+                ),
+                _TiempoItem(
+                  icon: Icons.directions_bus,
+                  label: transbordos == 1
+                      ? 'Transporte · 1 cambio'
+                      : 'Transporte · $transbordos cambios',
+                  value: _formatearTiempo(transporte),
+                ),
+                _TiempoItem(
+                  icon: Icons.flag,
+                  label: 'Final',
+                  value: _formatearTiempo(caminataFinal),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatearTiempo(int segundos) {
+    final minutos = (segundos / 60).round();
+    if (minutos < 60) return '$minutos min';
+    final horas = minutos ~/ 60;
+    final resto = minutos % 60;
+    if (resto == 0) return '${horas}h';
+    return '${horas}h ${resto}m';
+  }
+}
+
+class _TiempoItem extends StatelessWidget {
+  const _TiempoItem({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: const Color(0xFF64748B)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -165,7 +324,8 @@ Widget previewMainPage() {
     create: (_) => RoutingBloc(),
     child: MapLayout(
       mapRepository: MockMapRepository(),
-      mapBuilder: (context, styleString) => MockMapView(styleString: styleString),
+      mapBuilder: (context, styleString) =>
+          MockMapView(styleString: styleString),
       child: MainPage(
         searchRepository: MockSearchRepository(),
         locationRepository: MockLocationRepository(),

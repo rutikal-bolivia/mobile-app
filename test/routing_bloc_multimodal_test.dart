@@ -161,6 +161,22 @@ RoutingBloc _crearBloc({
 }
 
 GrafoTransporte _grafoConViaje() {
+  final acceso = ParadaAcceso(
+    id: 10,
+    transporteId: 1,
+    nombre: 'Acceso',
+    latitud: -16.5,
+    longitud: -68.1,
+    utilizableParaCaminata: true,
+  );
+  final egreso = ParadaEgreso(
+    id: 20,
+    transporteId: 1,
+    nombre: 'Egreso',
+    latitud: -16.51,
+    longitud: -68.11,
+    utilizableParaCaminata: true,
+  );
   final a = ParadaEnRuta(
     id: 1,
     transporteId: 1,
@@ -178,7 +194,7 @@ GrafoTransporte _grafoConViaje() {
     orden: 2,
   );
   return GrafoTransporte(
-    nodos: [a, b],
+    nodos: [acceso, egreso, a, b],
     aristas: [
       AristaGrafo(
         origen: a,

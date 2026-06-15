@@ -176,11 +176,18 @@ class GraphBuilder {
     List<AristaGrafo> aristas,
     List<DiagnosticoGrafo> diagnosticos,
   ) {
+    int sinNodo = 0;
+    int sinPeso = 0;
+    final idsFaltantes = <int>{};
+
     for (final intervalo in intervalos) {
       final origen = enRutaPorId[intervalo.rutaParadaInicioId];
       final destino = enRutaPorId[intervalo.rutaParadaFinalId];
 
       if (origen == null || destino == null) {
+        sinNodo++;
+        if (origen == null) idsFaltantes.add(intervalo.rutaParadaInicioId);
+        if (destino == null) idsFaltantes.add(intervalo.rutaParadaFinalId);
         diagnosticos.add(
           DiagnosticoGrafo(
             tipo: TipoDiagnosticoGrafo.advertencia,
@@ -199,6 +206,7 @@ class GraphBuilder {
 
       final peso = intervalo.tiempoEstimadoSegundos;
       if (peso == null) {
+        sinPeso++;
         diagnosticos.add(
           DiagnosticoGrafo(
             tipo: TipoDiagnosticoGrafo.advertencia,
@@ -223,6 +231,20 @@ class GraphBuilder {
           distanciaMetros: intervalo.distanciaMetros,
         ),
       );
+    }
+
+    final ok = intervalos.length - sinNodo - sinPeso;
+    debugPrint(
+      '[GRAPH] Trayectorias procesadas: total=${intervalos.length} '
+      '✅ok=$ok ❌sinNodo=$sinNodo ❌sinPeso=$sinPeso '
+      '| enRutaPorId tiene ${enRutaPorId.length} entradas',
+    );
+    if (idsFaltantes.isNotEmpty) {
+      final muestra = (idsFaltantes.toList()..sort()).take(10).toList();
+      final minKey = enRutaPorId.keys.reduce((a, b) => a < b ? a : b);
+      final maxKey = enRutaPorId.keys.reduce((a, b) => a > b ? a : b);
+      debugPrint('[GRAPH] IDs NO encontrados (muestra): $muestra');
+      debugPrint('[GRAPH] Rango de enRutaPorId: $minKey–$maxKey');
     }
   }
 

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/sync_event_bus.dart';
 import '../../data/datasources/app_database_service.dart';
 import '../../data/datasources/native_bridge.dart';
 import '../../data/datasources/graph_storage_service.dart';
@@ -32,6 +34,7 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
   final CargarGrafoNativo cargarGrafoNativo;
   final CalcularRutaNativa calcularRutaNativa;
   GrafoTransporte? _grafoTransporte;
+  StreamSubscription<void>? _syncSub;
 
   RoutingBloc({
     GraphStorageService? storage,
@@ -53,6 +56,14 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
        cargarGrafoNativo = cargarGrafoNativo ?? _cargarGrafoAislado,
        calcularRutaNativa = calcularRutaNativa ?? _calcularRutaAislada,
        super(RoutingInitial()) {
+    // Reconstruye el grafo multimodal cada vez que el sync deposita datos nuevos.
+    // Cubre el caso habitual: app arranca sin trayectorias (asset vacío),
+    // el sync las descarga y el grafo se actualiza sin reiniciar.
+    _syncSub = syncEventBus.onSyncCompleted.listen((_) async {
+      await _reconstruirGrafoMultimodal();
+      debugPrint('=== [ROUTING] Grafo multimodal reconstruido tras sync ===');
+    });
+
     on<InitializeRouting>((event, emit) async {
       emit(RoutingLoading());
       try {
@@ -97,9 +108,13 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
         final resultadoMultimodal = await _intentarRutaMultimodal(event);
         if (resultadoMultimodal != null &&
             resultadoMultimodal.coordenadas.isNotEmpty) {
+          final tipos = resultadoMultimodal.segmentos.map((s) => s.tipo.name).join('→');
+          final muestra = resultadoMultimodal.coordenadas.take(3).toList();
           debugPrint(
-            "=== [ROUTING] Ruta multimodal calculada con ${resultadoMultimodal.segmentos.length} segmentos ===",
+            "=== [ROUTING] Ruta multimodal: ${resultadoMultimodal.segmentos.length} segmentos "
+            "| $tipos | ${resultadoMultimodal.coordenadas.length} pts ===",
           );
+          debugPrint("=== [ROUTING] Primeras coords [lat,lon]: $muestra ===");
           emit(
             RoutingSuccess(
               resultadoMultimodal.coordenadas,
@@ -139,6 +154,12 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
     });
   }
 
+  @override
+  Future<void> close() {
+    _syncSub?.cancel();
+    return super.close();
+  }
+
   List<List<double>> _parsearRuta(String linestring) {
     String puntosCrudos = linestring
         .replaceAll("LINESTRING(", "")
@@ -174,19 +195,66 @@ class RoutingBloc extends Bloc<RoutingEvent, RoutingState> {
     CalculateRouteRequested event,
   ) async {
     final grafo = _grafoTransporte;
-    if (grafo == null) return null;
-    if (grafo.estadisticas.aristasViaje == 0) return null;
+    if (grafo == null) {
+      debugPrint('=== [ROUTING] ❌ Grafo multimodal es null ===');
+      return null;
+    }
+    if (grafo.estadisticas.aristasViaje == 0) {
+      debugPrint(
+        '=== [ROUTING] ❌ Grafo sin aristas de viaje '
+        '(trayectoria_intervalo vacía). '
+        'nodos=${grafo.estadisticas.nodos} '
+        'aristas=${grafo.estadisticas.aristas} ===',
+      );
+      return null;
+    }
+
+    debugPrint(
+      '=== [ROUTING] ✅ Grafo OK — '
+      'nodos=${grafo.estadisticas.nodos} '
+      'aristasViaje=${grafo.estadisticas.aristasViaje} '
+      'transbordos=${grafo.estadisticas.aristasTransbordo} ===',
+    );
+
+    // Diagnóstico de candidatas antes de entrar al motor.
+    final candidatasAcceso =
+        multimodalRoutingEngine.seleccionarCandidatasAcceso(grafo, event.origin);
+    final candidatasEgreso =
+        multimodalRoutingEngine.seleccionarCandidatasEgreso(grafo, event.destination);
+
+    debugPrint(
+      '=== [ROUTING] Candidatas — '
+      'acceso=${candidatasAcceso.length} '
+      'egreso=${candidatasEgreso.length} '
+      '(radio=${multimodalRoutingEngine.config.radioMaximoCaminataMetros}m) ===',
+    );
+
+    if (candidatasAcceso.isEmpty) {
+      debugPrint('=== [ROUTING] ❌ Sin paradas dentro del radio de origen ===');
+      return null;
+    }
+    if (candidatasEgreso.isEmpty) {
+      debugPrint('=== [ROUTING] ❌ Sin paradas dentro del radio de destino ===');
+      return null;
+    }
 
     try {
-      return await multimodalRoutingEngine.calcularRuta(
+      final resultado = await multimodalRoutingEngine.calcularRuta(
         grafo: grafo,
         solicitud: SolicitudRutaMultimodal(
           origen: event.origin,
           destino: event.destination,
         ),
       );
+      if (resultado == null) {
+        debugPrint(
+          '=== [ROUTING] ❌ Motor devolvió null — '
+          'sin aristas de caminata válidas o sin camino en grafo ===',
+        );
+      }
+      return resultado;
     } catch (e) {
-      debugPrint('=== [ROUTING] Error en motor multimodal: $e ===');
+      debugPrint('=== [ROUTING] ❌ Excepción en motor multimodal: $e ===');
       return null;
     }
   }
